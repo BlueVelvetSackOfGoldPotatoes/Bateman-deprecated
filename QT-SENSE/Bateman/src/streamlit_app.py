@@ -84,8 +84,6 @@ def run_missing_dependencies(unmet):
             rank_leads_section()
         elif dep_key == "analytics":
             analytics_section()
-        elif dep_key == "extract_persons":
-            extract_persons_section()
         elif dep_key == "author_papers":
             author_papers_section()
         elif dep_key == "download_data":
@@ -122,8 +120,8 @@ for var in session_vars:
 
 # Define menu options
 menu_options = [
-    "Input Leads", "Scrape Lead Information", "Rank Leads (BANT)", 
-    "Analytics", "Extract Persons", "Author Papers", "Download Data"
+    "Input Leads", "Analyse Lead Information", "Rank Leads (BANT)", 
+    "Analytics", "Author Papers", "Download Data"
 ]
 
 # Create the option menu
@@ -148,6 +146,8 @@ def input_leads():
     """
     Section for Input Leads: Generate Leads or Add Leads Manually.
     """
+    leads_list = []
+
     st.subheader("Input Leads")
 
     context = st.text_area("Context:", value=st.session_state['context'])
@@ -161,7 +161,7 @@ def input_leads():
 
     if option == "Generate Leads":
         num_leads_total = st.number_input("Number of leads per type:", min_value=1, max_value=100, value=10, step=1, key='num_leads_total')
-        default_lead_types = ["Companies", "Research Groups"]
+        default_lead_types = ["Research Groups"]
         lead_types = st_tags(
             label='',
             text='Add or remove lead types:',
@@ -187,7 +187,7 @@ def input_leads():
                     st.session_state['leads'].extend(leads)
                     
                     # Create a DataFrame from the new leads
-                    new_leads_df = pd.DataFrame(leads, columns=["Name", "Type"])
+                    new_leads_df = pd.DataFrame(leads, columns=["Entity", "Type", "University", "City", "Country"])
                     
                     # Append to the existing leads_df DataFrame
                     st.session_state['leads_df'] = pd.concat([st.session_state['leads_df'], new_leads_df], ignore_index=True)
@@ -206,7 +206,7 @@ def input_leads():
         st.write("Enter your leads below:")
 
         leads_input = st.text_area(
-            "Enter one lead per line, in the format 'Name,Type':",
+            "Enter one lead per line, in the format 'Entity, Type, University, City, Country':",
             height=150,
             key='manual_leads_input'
         )
@@ -216,32 +216,50 @@ def input_leads():
             if not context.strip():
                 logger.error("Lead generation attempted with empty context.")
                 st.warning("Please provide a context for lead generation.")
-            leads_list = []
             for line in leads_input.strip().split('\n'):
                 parts = line.strip().split(',')
-                if len(parts) == 2:
+                if len(parts) == 5:
                     name = parts[0].strip()
                     lead_type = parts[1].strip()
-                    leads_list.append((name, lead_type))
+                    university = parts[2].strip()
+                    city = parts[3].strip()
+                    country = parts[4].strip()
+
+                    leads_list.append({
+                        "Entity": name,
+                        "Type": lead_type,
+                        "University": university,
+                        "City": city,
+                        "Country": country
+                    })
                 else:
                     logger.warning(f"Invalid format in line: {line}")
-                    st.warning(f"Invalid format in line: {line}. Please use 'Name,Type'.")
+                    st.warning(f"Invalid format in line: {line}. Please use 'Entity, Type, University, City, Country'.")
             if leads_list:
-                # Append to the existing leads list
-                st.session_state['leads'].extend(leads_list)
-                
-                # Append to the existing leads_df DataFrame
-                new_leads_df = pd.DataFrame(leads_list, columns=["Name", "Type"])
-                st.session_state['leads_df'] = pd.concat([st.session_state['leads_df'], new_leads_df], ignore_index=True)
-                
-                # Update the 'step' if necessary
-                st.session_state['step'] = max(st.session_state['step'], 2)
-                
-                st.success(f"Leads added successfully! Total leads: {len(st.session_state['leads'])}")
-                logger.info(f"Added {len(leads_list)} leads manually.")
+                # Convert existing leads to a set for faster lookup
+                existing_leads_set = set(tuple(lead.values()) for lead in st.session_state['leads'])
+
+                # Filter out any leads that already exist
+                new_unique_leads = [lead for lead in leads_list if tuple(lead.values()) not in existing_leads_set]
+
+                if new_unique_leads:
+                    # Append to the existing leads list
+                    st.session_state['leads'].extend(new_unique_leads)
+                    
+                    # Append to the existing leads_df DataFrame
+                    new_leads_df = pd.DataFrame(new_unique_leads, columns=["Entity", "Type", "University", "City", "Country"])
+                    st.session_state['leads_df'] = pd.concat([st.session_state['leads_df'], new_leads_df], ignore_index=True)
+                    
+                    # Update the 'step' if necessary
+                    st.session_state['step'] = max(st.session_state['step'], 2)
+                    
+                    st.success(f"Added {len(new_unique_leads)} new leads successfully! Total leads: {len(st.session_state['leads'])}")
+                    logger.info(f"Added {len(new_unique_leads)} leads manually.")
+                else:
+                    st.info("No new unique leads to add.")
             else:
                 logger.error("No valid leads entered.")
-                st.error("No valid leads entered. Please ensure each line is in the format 'Name,Type'.")
+                st.error("No valid leads entered. Please ensure each line is in the format 'Entity, Type, University, City, Country'.")
                 st.stop()
 
     elif option == "Search Leads via Conference":
@@ -260,17 +278,26 @@ def input_leads():
                 with st.spinner('Searching for leads associated with the conference...'):
                     leads_list = search_leads_via_conference(conference_input, context)
                     if leads_list:
-                        # Append to the existing leads list
-                        st.session_state['leads'].extend(leads_list)
-                        
-                        # Create a DataFrame from the new leads
-                        new_leads_df = pd.DataFrame(leads_list, columns=["Name", "Type"])
-                        
-                        # Append to the existing leads_df DataFrame
-                        st.session_state['leads_df'] = pd.concat([st.session_state['leads_df'], new_leads_df], ignore_index=True)
-                        
-                        st.success(f"Leads extracted successfully! Total leads: {len(st.session_state['leads'])}")
-                        logger.info(f"Extracted {len(leads_list)} leads from conference input.")
+                        # Convert existing leads to a set for faster lookup
+                        existing_leads_set = set(st.session_state['leads'])
+
+                        # Filter out any leads that already exist
+                        new_unique_leads = [lead for lead in leads_list if lead not in existing_leads_set]
+
+                        if new_unique_leads:
+                            # Append to the existing leads list
+                            st.session_state['leads'].extend(new_unique_leads)
+                            
+                            # Create a DataFrame from the new leads
+                            new_leads_df = pd.DataFrame(new_unique_leads, columns=["Entity", "Type", "University", "City", "Country"])
+
+                            # Append to the existing leads_df DataFrame
+                            st.session_state['leads_df'] = pd.concat([st.session_state['leads_df'], new_leads_df], ignore_index=True)
+                            
+                            st.success(f"Leads extracted successfully! Added {len(new_unique_leads)} new leads. Total leads: {len(st.session_state['leads'])}")
+                            logger.info(f"Extracted {len(new_unique_leads)} leads from conference input.")
+                        else:
+                            st.info("No new unique leads found for the provided conference.")
                     else:
                         st.warning("No leads found for the provided conference.")
 
@@ -296,45 +323,60 @@ def input_leads():
                 st.session_state['leads_df'] = edited_leads_df
 
                 # Synchronize the 'leads' list with the updated DataFrame
-                st.session_state['leads'] = list(zip(edited_leads_df['Name'], edited_leads_df['Type']))
+                st.session_state['leads'] = list(zip(
+                    edited_leads_df['Entity'],
+                    edited_leads_df['Type'],
+                    edited_leads_df['University'],
+                    edited_leads_df['City'],
+                    edited_leads_df['Country']
+                ))
 
                 st.success("Leads updated successfully!")
                 logger.info("Leads edited via data editor.")
 
             # Display the edited DataFrame
-            display_leads_df = st.session_state['leads_df']
-            display_leads_df = display_leads_df.rename(columns={"Name": "Company/Group Name", "Type": "Category"})
-            display_leads_df = display_leads_df[["Company/Group Name", "Category"]]
+            # display_leads_df = st.session_state['leads_df']
 
-            display_leads_df = display_leads_df.rename(columns={"Company/Group Name": "Name", "Category": "Type"})
+            display_leads_df = st.session_state['leads_df'].copy()
+            # display_leads_df.rename(columns={
+            #     "Entity": "Name",
+            #     "Type": "Category",
+            #     "University": "University",
+            #     "City": "City",
+            #     "Country": "Country"
+            # }, inplace=True)
 
             display_and_download(
                 df=display_leads_df,
                 button_label="Leads",
                 filename="leads"
             )
+
         except Exception as e:
             logger.error(f"Error editing leads: {e}")
             st.error(f"Error editing leads: {e}")
             st.stop()
     
-    existing_leads = set(st.session_state['leads'])
-    unique_leads = [lead for lead in leads_list if lead not in existing_leads]
-    st.session_state['leads'] = unique_leads
     st.session_state['input_leads'] = True
-    st.success("Input Leads completed successfully!")
+    st.success("Input Leads section loaded successfully!")
 
 def scrape_lead_information():
     """
-    Section for Scrape Lead Information: Perform per-field searches and scrape information.
+    Section for Analyze Lead Information: Perform per-field searches and scrape information,
+    then extract and analyze persons associated with each lead.
     """
-    st.subheader("Search and Scrape Lead Information")
+    st.subheader("Search and Analyse Lead Information")
     progress_bar = st.empty()
     status_text = st.empty()
     lead_placeholder = st.empty()
+    person_placeholder = st.empty()
     
-    st.header("Scrape Lead Information")
-    default_columns = ["Company/Group Name", "CEO/PI", "Researchers", "Grants", "Phone Number", "Email", "Country", "University", "Summary", "Contacts"]
+    st.header("Analyze Lead Information")
+    default_columns = [
+        "Entity", "CEO/PI", "Researchers", "Grants",
+        "Phone Number", "Email", "Country", "University",
+        "Summary", "Contacts"
+    ]
     columns_to_retrieve = st_tags(
         label='',
         text='Add or remove information fields:',
@@ -344,423 +386,11 @@ def scrape_lead_information():
         key='columns_to_retrieve'
     )
     
-    search_btn = st.button("Search and Scrape Leads", key='search_leads_btn')
-    if search_btn:
-        if not st.session_state.get('context_input', '').strip():
-                logger.error("Lead generation attempted with empty context.")
-                st.warning("Please provide a context for lead generation.")
-        if not st.session_state['leads']:
-            logger.error("Lead scraping attempted without any generated or added leads.")
-            st.error("No leads available. Please add or generate leads first.")
-            st.stop()
-        elif not columns_to_retrieve:
-            logger.error("Lead scraping attempted without specifying information fields.")
-            st.error("Please select at least one information field to retrieve.")
-            st.stop()
-        else:
-            if not st.session_state['is_scraping']:
-                st.session_state['is_scraping'] = True
-                st.session_state['processed_leads'] = []
-                st.session_state['leads_info_df'] = pd.DataFrame()
-            
-            total_leads = len(st.session_state['leads'])
-            progress_increment = 100 / total_leads
-            progress = 0
-            progress_bar.progress(0)
-            status_text.text("Starting lead information scraping...")
-            
-            for idx, (lead_name, lead_category) in enumerate(st.session_state['leads']):
-                status_text.text(f"Processing Lead {idx + 1} of {total_leads}: {lead_name}")
-                
-                # Scrape per-field information
-                field_data_list = []
-                for field in columns_to_retrieve:
-                    if field in ["Company/Group Name", "Summary", "Category"]:
-                        continue  # Skip fields that don't require scraping
-                    field_data = scrape_information_field(lead_name, field, num_search_results=1)
-                    field_data_list.append(field_data)
-                    time.sleep(random.uniform(1, 3))  # Respect rate limits
-                
-                # Extract lead information using GPT with chunking
-                lead_info = extract_lead_info_with_llm_per_field(lead_name, lead_category, field_data_list)
-                if lead_info:
-                    st.session_state['leads_info_df'] = pd.concat(
-                        [st.session_state['leads_info_df'], pd.DataFrame([lead_info])],
-                        ignore_index=True
-                    )
-                    st.session_state['processed_leads'].append(lead_info)
-                    
-                    # Update the UI with the newly processed lead
-                    with lead_placeholder.container():
-                        st.markdown(f"### {lead_info.get('Company/Group Name', 'Unknown')}")
-                        st.json(lead_info, expanded=False)
-                        st.markdown("---")
-                
-                # Update progress bar
-                progress += progress_increment
-                progress_bar.progress(min(progress, 100) / 100)
-            
-            status_text.text("Lead information scraping completed!")
-            st.success("All leads have been processed successfully.")
-            st.session_state['is_scraping'] = False
-
-    # Display the Leads Information DataFrame if it exists
-    if not st.session_state['leads_info_df'].empty:
-        st.write("### Leads Information")
-        display_lead_information(
-            df=st.session_state['leads_info_df'],
-            button_label="Leads Information",
-            filename="leads_info"
-        )
-    st.session_state['scrape_lead_information'] = True
-    st.success("Lead information scraped successfully!")
-
-def analytics_section():
-    """
-    Section for Analytics: Provide various analytics and visualizations.
-    """
-    st.subheader("Analytics")
-    # if st.session_state.get('ranked_leads_df', pd.DataFrame()).empty:
-    #     st.warning("No ranked leads available. Please rank the leads first.")
-    #     if st.button("Go to Rank Leads"):
-    #         st.session_state['menu_selection'] = "Rank Leads (BANT)"
-    #         st.rerun()
-    #     return
-
-    analytics_expander = st.expander("View Analytics")
-    with analytics_expander:
-        # Number of Grants per Lead
-        if 'Grant Received' in st.session_state['ranked_leads_df'].columns:
-            st.markdown("### Number of Grants per Lead")
-            def count_grants(grant_entry):
-                if isinstance(grant_entry, list):
-                    return len(grant_entry)
-                elif isinstance(grant_entry, str) and grant_entry.strip():
-                    return 1
-                else:
-                    return 0
-            st.session_state['ranked_leads_df']['Grant Count'] = st.session_state['ranked_leads_df']['Grant Received'].apply(count_grants)
-
-            # Plotting Number of Grants per Lead
-            fig, ax = plt.subplots(figsize=(10, 6))
-            x = np.arange(len(st.session_state['ranked_leads_df']))
-            ax.bar(x, st.session_state['ranked_leads_df']['Grant Count'])
-            ax.set_xlabel('Lead Name')
-            ax.set_ylabel('Number of Grants')
-            ax.set_title('Number of Grants per Lead')
-            ax.set_xticks(x)
-            try:
-                ax.set_xticklabels(st.session_state['ranked_leads_df']['Company/Group Name'], rotation=90)
-            except KeyError:
-                logger.error("'Company/Group Name' column missing in ranked_leads_df when setting x-tick labels.")
-                ax.set_xticklabels(['Unknown'] * len(x), rotation=90)
-            ax.yaxis.set_major_locator(plt.MaxNLocator(integer=True))
-            plt.tight_layout()
-            st.pyplot(fig)
-        else:
-            logger.warning("No 'Grant Received' column available in ranked_leads_df.")
-            st.warning("No 'Grant Received' data available for grants analysis.")
-
-        # Grant Years Distribution
-        if 'Grant Received' in st.session_state['ranked_leads_df'].columns:
-            st.markdown("### Grant Years Distribution")
-            def extract_years(grant_entry):
-                years = []
-                if isinstance(grant_entry, list):
-                    for grant in grant_entry:
-                        matches = re.findall(r'\b(19|20)\d{2}\b', grant)
-                        years.extend(matches)
-                elif isinstance(grant_entry, str):
-                    matches = re.findall(r'\b(19|20)\d{2}\b', grant_entry)
-                    years.extend(matches)
-                return [int(year) for year in years]
-
-            st.session_state['ranked_leads_df']['Grant Years'] = st.session_state['ranked_leads_df']['Grant Received'].apply(extract_years)
-            all_years = [year for sublist in st.session_state['ranked_leads_df']['Grant Years'] for year in sublist]
-            if all_years:
-                years_series = pd.Series(all_years)
-                years_counts = years_series.value_counts().sort_index()
-                # Plot the grant years distribution
-                fig, ax = plt.subplots(figsize=(10, 6))
-                ax.bar(years_counts.index.astype(int), years_counts.values)
-                ax.set_xlabel('Year')
-                ax.set_ylabel('Number of Grants')
-                ax.set_title('Distribution of Grants by Year')
-                plt.xticks(rotation=90)
-                plt.tight_layout()
-                st.pyplot(fig)
-            else:
-                logger.warning("No grant years data available.")
-                st.warning("No grant years data available for distribution analysis.")
-        else:
-            logger.warning("No 'Grant Received' column available in ranked_leads_df.")
-            st.warning("No 'Grant Received' data available for grant years distribution.")
-
-        # Number of Phone Numbers and Emails per Company
-        st.markdown("### Number of Phone Numbers and Emails per Company")
-        if 'Contacts' in st.session_state['ranked_leads_df'].columns:
-            def count_emails_and_phones(contacts_entry):
-                num_emails = 0
-                num_phones = 0
-                if isinstance(contacts_entry, str):
-                    try:
-                        contacts_list = json.loads(contacts_entry)
-                    except json.JSONDecodeError:
-                        contacts_list = []
-                elif isinstance(contacts_entry, list):
-                    contacts_list = contacts_entry
-                else:
-                    contacts_list = []
-                for contact in contacts_list:
-                    email = contact.get('Email')
-                    if email and email.strip().lower() not in ['not provided', 'not available', '']:
-                        num_emails += 1
-                    phone = contact.get('Phone Number')
-                    if phone and phone.strip().lower() not in ['not provided', 'not available', '']:
-                        num_phones += 1
-                return pd.Series({'Num Emails': num_emails, 'Num Phones': num_phones})
-
-            contacts_counts = st.session_state['ranked_leads_df']['Contacts'].apply(count_emails_and_phones)
-            st.session_state['ranked_leads_df'] = st.session_state['ranked_leads_df'].join(contacts_counts)
-            # Display the counts in a table
-            try:
-                st.write("#### Emails and Phone Numbers per Company")
-                st.write(st.session_state['ranked_leads_df'][['Company/Group Name', 'Num Emails', 'Num Phones']])
-            except KeyError:
-                logger.error("'Company/Group Name', 'Num Emails', or 'Num Phones' columns missing in ranked_leads_df.")
-                st.error("Required columns for contact analysis are missing.")
-                st.stop()
-
-            # Plot number of emails and phone numbers per company
-            fig, ax = plt.subplots(figsize=(10, 6))
-            x = np.arange(len(st.session_state['ranked_leads_df']))
-            width = 0.35
-            try:
-                ax.bar(x - width/2, st.session_state['ranked_leads_df']['Num Emails'], width, label='Emails')
-                ax.bar(x + width/2, st.session_state['ranked_leads_df']['Num Phones'], width, label='Phone Numbers')
-                ax.set_xlabel('Company/Group Name')
-                ax.set_ylabel('Count')
-                ax.set_title('Number of Emails and Phone Numbers per Company')
-                ax.set_xticks(x)
-                try:
-                    ax.set_xticklabels(st.session_state['ranked_leads_df']['Company/Group Name'], rotation=90)
-                except KeyError:
-                    logger.error("'Company/Group Name' column missing in ranked_leads_df when setting x-tick labels.")
-                    ax.set_xticklabels(['Unknown'] * len(x), rotation=90)
-                ax.legend()
-                plt.tight_layout()
-                st.pyplot(fig)
-            except KeyError:
-                logger.error("One of the required columns for plotting is missing in ranked_leads_df.")
-                st.error("Required columns for contact plotting are missing.")
-                st.stop()
-        else:
-            logger.warning("No 'Contacts' data available in ranked_leads_df.")
-            st.warning("No 'Contacts' data available for contact analysis.")
-
-        # Number of Individual Names per Company
-        st.markdown("### Number of Individual Names per Company")
-        def count_individual_names(row):
-            names = set()
-            # From CEO/PI
-            ceo_pi = row.get('CEO/PI')
-            if isinstance(ceo_pi, str) and ceo_pi.strip() and ceo_pi.strip().lower() != 'not available':
-                names.add(ceo_pi.strip())
-            # From Researchers
-            researchers = row.get('Researchers')
-            if isinstance(researchers, list):
-                names.update([r for r in researchers if r.strip().lower() != 'not available'])
-            elif isinstance(researchers, str) and researchers.strip() and researchers.strip().lower() != 'not available':
-                names.add(researchers.strip())
-            # From Contacts
-            contacts = row.get('Contacts')
-            if isinstance(contacts, str):
-                try:
-                    contacts_list = json.loads(contacts)
-                except json.JSONDecodeError:
-                    contacts_list = []
-            elif isinstance(contacts, list):
-                contacts_list = contacts
-            else:
-                contacts_list = []
-            for contact in contacts_list:
-                name = contact.get('Name')
-                if name and name.strip().lower() != 'not available':
-                    names.add(name.strip())
-            return len(names)
-
-        try:
-            st.session_state['ranked_leads_df']['Num Individuals'] = st.session_state['ranked_leads_df'].apply(count_individual_names, axis=1)
-            # Display the counts in a table
-            try:
-                st.write("#### Number of Individual Names per Company")
-                st.write(st.session_state['ranked_leads_df'][['Company/Group Name', 'Num Individuals']])
-            except KeyError:
-                logger.error("'Company/Group Name' or 'Num Individuals' columns missing in ranked_leads_df.")
-                st.error("Required columns for individual names count are missing.")
-                st.stop()
-
-            # Plot number of individuals per company
-            try:
-                fig, ax = plt.subplots(figsize=(10, 6))
-                x = np.arange(len(st.session_state['ranked_leads_df']))
-                ax.bar(x, st.session_state['ranked_leads_df']['Num Individuals'])
-                ax.set_xlabel('Company/Group Name')
-                ax.set_ylabel('Number of Individuals')
-                ax.set_title('Number of Individual Names per Company')
-                ax.set_xticks(x)
-                try:
-                    ax.set_xticklabels(st.session_state['ranked_leads_df']['Company/Group Name'], rotation=90)
-                except KeyError:
-                    logger.error("'Company/Group Name' column missing in ranked_leads_df when setting x-tick labels.")
-                    ax.set_xticklabels(['Unknown'] * len(x), rotation=90)
-                plt.tight_layout()
-                st.pyplot(fig)
-            except KeyError:
-                logger.error("'Company/Group Name' or 'Num Individuals' columns missing in ranked_leads_df.")
-                st.error("Required columns for individual names plotting are missing.")
-                st.stop()
-            except Exception as e:
-                logger.error(f"Error plotting individual names: {e}")
-                st.error(f"Error plotting individual names: {e}")
-                st.stop()
-        except Exception as e:
-            logger.error(f"Error counting individual names: {e}")
-            st.error(f"Error counting individual names: {e}")
-            st.stop()
-
-        # Summaries
-        if 'Summary' in st.session_state['ranked_leads_df'].columns:
-            st.markdown("### Summaries")
-            for idx, row in st.session_state['ranked_leads_df'].iterrows():
-                company_name = row['Company/Group Name']
-                summary = row['Summary']
-                if pd.notnull(summary) and summary.strip():
-                    st.write(f"**{company_name}:** {summary}")
-                else:
-                    st.write(f"**{company_name}:** No summary available.")
-                st.markdown("---")
-
-            # Word Cloud for Summaries
-            summaries = st.session_state['ranked_leads_df']['Summary'].dropna().tolist()
-            combined_text = ' '.join(summaries)
-            if combined_text:
-                st.markdown("### Word Cloud for Summaries")
-                wordcloud = WordCloud(width=800, height=400, background_color='white').generate(combined_text)
-                fig, ax = plt.subplots(figsize=(10, 5))
-                ax.imshow(wordcloud, interpolation='bilinear')
-                ax.axis('off')
-                plt.tight_layout()
-                st.pyplot(fig)
-            else:
-                logger.warning("No summaries available for word cloud.")
-                st.warning("No summaries available to generate a word cloud.")
-        else:
-            logger.warning("No 'Summary' column available in ranked_leads_df.")
-            st.warning("No 'Summary' data available for summaries and word cloud.")
-
-        # ==========================
-        # Enhanced Analytics: Person Profiles
-        # ==========================
-        st.markdown("### Detailed Person Profiles")
-
-        if 'person_leads_df' in st.session_state and not st.session_state['person_leads_df'].empty:
-            person_leads_df = st.session_state['person_leads_df']
-            # Ensure 'Company/Group Name' exists in person_leads_df
-            if 'Company/Group Name' not in person_leads_df.columns:
-                if 'Associated Company' in person_leads_df.columns:
-                    person_leads_df = person_leads_df.rename(columns={'Associated Company': 'Company/Group Name'})
-                    logger.info("Renamed 'Associated Company' to 'Company/Group Name' in person_leads_df.")
-                else:
-                    logger.warning("Company association for persons not found.")
-                    st.warning("Company association for persons not found. Assigning 'Unknown' to persons without a company.")
-                    person_leads_df['Company/Group Name'] = 'Unknown'
-            else:
-                logger.info("'Company/Group Name' exists in person_leads_df.")
-
-            # Check again after renaming or assigning
-            if 'Company/Group Name' in person_leads_df.columns:
-                try:
-                    # Group persons by company
-                    grouped = person_leads_df.groupby('Company/Group Name')
-
-                    for company, group in grouped:
-                        st.markdown(f"#### {company}")
-                        # Display a table for each company
-                        display_and_download(
-                            df=group.drop(columns=['Company/Group Name']),
-                            button_label=f"Persons at {company}",
-                            filename=f"persons_at_{company.replace(' ', '_')}"
-                        )
-                except Exception as e:
-                    logger.error(f"Error displaying person profiles: {e}")
-                    st.error(f"Error displaying person profiles: {e}")
-                    st.stop()
-            else:
-                logger.error("'Company/Group Name' column missing in person_leads_df after renaming.")
-                st.error("'Company/Group Name' column missing in person_leads_df after renaming.")
-                st.stop()
-        else:
-            logger.warning("No person leads data available.")
-            st.warning("No person leads data available. Please extract and scrape persons first.")
-
-        # ==========================
-        # BANT-Specific Analytics
-        # ==========================
-        if 'ranked_leads_df' in st.session_state and not st.session_state['ranked_leads_df'].empty:
-            st.markdown("### BANT Analysis Insights")
-            
-            # Distribution of BANT Scores
-            st.markdown("#### Distribution of BANT Scores")
-            bant_scores = ['Budget Score', 'Authority Score', 'Need Score', 'Timeline Score', 'Overall BANT Score']
-            for score in ['Budget Score', 'Authority Score', 'Need Score', 'Timeline Score']:
-                plt.figure(figsize=(8, 4))
-                plt.hist(st.session_state['ranked_leads_df'][score], bins=10, color='skyblue', edgecolor='black')
-                plt.title(f'Distribution of {score}')
-                plt.xlabel(score)
-                plt.ylabel('Number of Leads')
-                plt.tight_layout()
-                st.pyplot(plt)
-            
-            # Overall BANT Score
-            plt.figure(figsize=(8, 4))
-            plt.hist(st.session_state['ranked_leads_df']['Overall BANT Score'], bins=10, color='salmon', edgecolor='black')
-            plt.title('Distribution of Overall BANT Scores')
-            plt.xlabel('Overall BANT Score')
-            plt.ylabel('Number of Leads')
-            plt.tight_layout()
-            st.pyplot(plt)
-            
-            # Recommendations Breakdown
-            st.markdown("#### Recommendations Breakdown")
-            recommendations_counts = st.session_state['ranked_leads_df']['Recommendations'].value_counts()
-            plt.figure(figsize=(8, 6))
-            plt.pie(recommendations_counts.values, labels=recommendations_counts.index, autopct='%1.1f%%', startangle=140)
-            plt.title('Recommendations Distribution')
-            plt.axis('equal')
-            plt.tight_layout()
-            st.pyplot(plt)
-            
-            # Correlation Heatmap of BANT Scores
-            st.markdown("#### Correlation Between BANT Scores")
-            correlation = st.session_state['ranked_leads_df'][['Budget Score', 'Authority Score', 'Need Score', 'Timeline Score', 'Overall BANT Score']].corr()
-            fig, ax = plt.subplots(figsize=(8, 6))
-            sns.heatmap(correlation, annot=True, cmap='coolwarm', ax=ax)
-            plt.title('Correlation Heatmap of BANT Scores')
-            plt.tight_layout()
-            st.pyplot(fig)
-        else:
-            st.warning("No BANT analysis data available for analytics.")
-
-
-def extract_persons_section():
-    """
-    Section for Extract Persons: Extract and Scrape Persons Associated with Leads.
-    """
-    st.subheader("Extract and Scrape Persons Associated with Leads")
-    
-    # Add input for additional search keywords
-    default_person_keywords = ["email", "phone number", "profile", "CV", "LinkedIn", "research", "publications"]
+    # Add input for additional search keywords for persons
+    default_person_keywords = [
+        "email", "phone number", "profile", "CV", "LinkedIn",
+        "research", "publications", "grant"
+    ]
     person_search_keywords = st_tags(
         label='',
         text='Add or remove keywords to guide the person search:',
@@ -769,87 +399,891 @@ def extract_persons_section():
         maxtags=20,
         key='person_search_keywords'
     )
+    
+    search_btn = st.button("Search and Analyse Leads", key='search_leads_btn')
+    if search_btn:
+        # Validate input context
+        if st.session_state.get('context', '') == '':
+            logger.error("Lead scraping attempted with empty context.")
+            st.warning("Please provide a context for lead scraping.")
+            return
+        
+        # Validate that leads are available
+        if not st.session_state.get('leads'):
+            logger.error("Lead scraping attempted without any generated or added leads.")
+            st.error("No leads available. Please add or generate leads first.")
+            return
+        
+        # Validate that at least one information field is selected
+        if not columns_to_retrieve:
+            logger.error("Lead scraping attempted without specifying information fields.")
+            st.error("Please select at least one information field to retrieve.")
+            return
+        
+        # Initialize scraping state if not already in progress
+        if not st.session_state.get('is_scraping', False):
+            st.session_state['is_scraping'] = True
+            st.session_state['processed_leads'] = []
+            st.session_state['leads_info_df'] = pd.DataFrame()
+            st.session_state['person_leads_df'] = pd.DataFrame()
+        
+        total_leads = len(st.session_state['leads'])
+        progress_increment = 100 / total_leads
+        progress = 0
+        progress_bar.progress(0)
+        status_text.text("Starting lead information scraping...")
+        print("dic:", st.session_state['leads'])
+        print(f"st.session_state['leads']: {st.session_state['leads']}")
+        for idx, lead in enumerate(st.session_state['leads']):
 
-    extract_persons_btn = st.button("Extract and Scrape Persons", key='extract_persons_btn')
-    if extract_persons_btn:
-        if st.session_state['leads_info_df'].empty:
-            logger.error("Person extraction attempted without lead information.")
-            st.error("No lead information available. Please scrape lead information first.")
-            st.stop()
-        else:
-            with st.spinner('Extracting persons associated with leads...'):
+            lead_name = lead.get("Entity", "Unknown")
+            lead_category = lead.get("Type", "Unknown")
+            lead_university = lead.get("University", "Unknown")
+            lead_city = lead.get("City", "Unknown")
+            lead_country = lead.get("Country", "Unknown")
+                    
+            status_text.text(f"Processing Lead {idx + 1} of {total_leads}: {lead_name}")
+            # Analyse per-field information
+            field_data_list = []
+            for field in columns_to_retrieve:
+                if field in ["Entity", "Summary", "Type"]:
+                    continue  # Skip fields that don't require scraping
+                field_data = scrape_information_field(lead_name, field, num_search_results=1)
+                field_data_list.append(field_data)
+                time.sleep(random.uniform(1, 3))  # Respect rate limits
+            
+            # Extract lead information using GPT with chunking
+            lead_info = extract_lead_info_with_llm_per_field(lead_name, lead_category, field_data_list)
+            if lead_info:
+                # Append lead information to the DataFrame
+                st.session_state['leads_info_df'] = pd.concat(
+                    [st.session_state['leads_info_df'], pd.DataFrame([lead_info])],
+                    ignore_index=True
+                )
+                st.session_state['processed_leads'].append(lead_info)
+                
+                # Update the UI with the newly processed lead
+                with lead_placeholder.container():
+                    st.markdown(f"### {lead_info.get('Entity', 'Unknown')}")
+                    st.json(lead_info, expanded=False)
+                    st.markdown("---")
+            
+            # Extract and Analyze Persons Associated with the Lead
+            with person_placeholder.container():
+                st.subheader(f"Extracting Persons for {lead_name}")
+                person_status_text = st.empty()
+                person_progress_bar = st.progress(0)
+                
                 persons = extract_persons(st.session_state['leads_info_df'])
+                
                 if not persons:
-                    logger.warning("No persons found associated with the leads.")
-                    st.warning("No persons found associated with the leads.")
+                    logger.warning(f"No persons found associated with the lead '{lead_name}'.")
+                    st.warning(f"No persons found associated with the lead '{lead_name}'.")
                 else:
-                    logger.info(f"Found {len(persons)} unique persons associated with the leads.")
+                    logger.info(f"Found {len(persons)} unique persons associated with the lead '{lead_name}'.")
+                    person_progress_increment = 100 / len(persons)
+                    person_progress = 0
+                    person_leads = []
 
-        if 'persons' in locals() and persons:
-            with st.spinner('Generating detailed person information...'):
-                person_leads = []
-                person_placeholder = st.empty()
-                for idx, (person_name, associated_lead) in enumerate(persons):
-                    person_placeholder.text(f"Processing Person {idx + 1}/{len(persons)}: {person_name} (Company: {associated_lead})")
-                    # Include the additional keywords in the search
-                    person_urls = perform_google_search(person_name, additional_keywords=person_search_keywords)
-                    if not person_urls:
-                        logger.warning(f"No URLs found for '{person_name}'.")
-                        continue
-                    scraped_text = ""
-                    sources = []
-                    # Scrape the URLs
-                    for url in person_urls:
-                        logger.info(f"Scraping URL for '{person_name}': {url}")
-                        with st.spinner(f"Scraping URL for '{person_name}': {url}"):
-                            scraped_text += scrape_landing_page(url) + " "
-                            sources.append(url)
-                    if not scraped_text.strip():
-                        logger.warning(f"No text scraped from URLs for '{person_name}'.")
-                        continue
-                    cleaned_text = clean_text(scraped_text)
-                    source_urls = ', '.join(sources)
-                    person_info = extract_person_info_with_llm(cleaned_text, person_name, source_urls)
-                    if person_info:
-                        # Ensure 'Company/Group Name' is included
-                        person_info['Company/Group Name'] = associated_lead
-                        person_leads.append(person_info)
-            if person_leads:
+                    print("dic:", st.session_state['leads_info_df'])
+                    print(f"st.session_state['leads_info_df']: {st.session_state['leads_info_df']}")
+                    
+                    for p_idx, (person_name, associated_lead) in enumerate(persons):
+                        person_status_text.text(f"Processing Person {p_idx + 1}/{len(persons)}: {person_name}")
+                        # Include the additional keywords in the search
+                        person_urls = perform_google_search(person_name, additional_keywords=person_search_keywords)
+                        if not person_urls:
+                            logger.warning(f"No URLs found for '{person_name}'.")
+                            continue
+                        scraped_text = ""
+                        sources = []
+                        # Analyse the URLs
+                        for url in person_urls:
+                            logger.info(f"Looking at URL for '{person_name}': {url}")
+                            with st.spinner(f"Looking at URL for '{person_name}': {url}"):
+                                scraped_content = scrape_landing_page(url)
+                                if scraped_content:
+                                    scraped_text += scraped_content + " "
+                                    sources.append(url)
+                                time.sleep(random.uniform(1, 2))  # Respect rate limits
+                        if not scraped_text.strip():
+                            logger.warning(f"No text scraped from URLs for '{person_name}' Skipping.")
+                            continue
+                        cleaned_text = clean_text(scraped_text)
+                        source_urls = sources
+                        person_info = extract_person_info_with_llm(cleaned_text, person_name, source_urls)
+                        if person_info:
+                            person_info['Name'] = person_name  # Ensure correct name assignment
+                            person_leads.append(person_info)
+                        
+                        # Update person progress bar
+                        person_progress += person_progress_increment
+                        person_progress_bar.progress(min(person_progress, 100) / 100)
+                    
+                    # Append person leads to the session state DataFrame
+                    if person_leads:
+                        try:
+                            person_leads_df = pd.DataFrame(person_leads)
+                            st.session_state['person_leads_df'] = pd.concat(
+                                [st.session_state['person_leads_df'], person_leads_df],
+                                ignore_index=True
+                            )
+                            st.success(f"Person information scraped successfully for lead '{lead_name}'!")
+                            logger.info(f"Person information scraped successfully for lead '{lead_name}'.")
+                            
+                            # Display the person leads information
+                            st.write(f"### Persons Associated with {lead_name}")
+                            display_lead_information(
+                                df=person_leads_df,
+                                button_label="Download Person Leads Information",
+                                filename=f"person_leads_info_{lead_name.replace(' ', '_')}"
+                            )
+                            
+                        except Exception as e:
+                            logger.error(f"Error creating person_leads_df: {e}")
+                            st.error(f"Error processing scraped person information for lead '{lead_name}': {e}")
+                    else:
+                        logger.error(f"Person information scraping failed for lead '{lead_name}'.")
+                        st.error(f"Failed to scrape person information for lead '{lead_name}'. Please check the logs for more details.")
+                        
+            # Update overall progress bar
+            progress += progress_increment
+            progress_bar.progress(min(progress, 100) / 100)
+        
+        status_text.text("Lead information scraping completed!")
+        st.success("All leads have been processed successfully.")
+        st.session_state['is_scraping'] = False
+    
+    # Display the Leads Information DataFrame if it exists
+    if not st.session_state.get('leads_info_df', pd.DataFrame()).empty:
+        st.write("### Leads Information")
+        display_lead_information(
+            df=st.session_state['leads_info_df'],
+            button_label="Download Leads Information",
+            filename="leads_info"
+        )
+    
+    st.session_state['scrape_lead_information'] = True
+    st.success("Lead information section loaded successfully!")
+
+def analytics_section():
+    """
+    Section for Analytics: Provide various analytics and visualizations.
+    """
+    st.subheader("Analytics")
+    
+    analytics_expander = st.expander("View Analytics")
+    with analytics_expander:
+        # ------------------------------
+        # Company-Level Analytics
+        # ------------------------------
+        if 'company_bant_df' in st.session_state and not st.session_state['company_bant_df'].empty:
+            # Number of Grants per Company
+            if 'Grants' in st.session_state['company_bant_df'].columns:
+                st.markdown("### Number of Grants per Company")
+                
+                def count_grants(grants_entry):
+                    if isinstance(grants_entry, list):
+                        return len(grants_entry)
+                    elif isinstance(grants_entry, str) and grants_entry.strip():
+                        return 1
+                    else:
+                        return 0
+                
+                st.session_state['company_bant_df']['Grant Count'] = st.session_state['company_bant_df']['Grants'].apply(count_grants)
+                
+                # Plotting Number of Grants per Company
+                fig, ax = plt.subplots(figsize=(10, 6))
+                sns.barplot(
+                    data=st.session_state['company_bant_df'],
+                    x='Entity',
+                    y='Grant Count',
+                    palette='viridis'
+                )
+                ax.set_xlabel('Entity')
+                ax.set_ylabel('Number of Grants')
+                ax.set_title('Number of Grants per Company')
+                plt.xticks(rotation=90)
+                plt.tight_layout()
+                st.pyplot(fig)
+            else:
+                logger.warning("No 'Grants' column available in company_bant_df.")
+                st.warning("No 'Grants' data available for grants analysis.")
+        
+            # Distribution of Overall BANT Scores (Companies)
+            st.markdown("### Distribution of Overall BANT Scores (Companies)")
+            if 'Overall BANT Score' in st.session_state['company_bant_df'].columns:
+                plt.figure(figsize=(10, 6))
+                sns.histplot(
+                    st.session_state['company_bant_df']['Overall BANT Score'],
+                    bins=10,
+                    kde=True,
+                    color='salmon'
+                )
+                plt.title('Distribution of Overall BANT Scores (Companies)')
+                plt.xlabel('Overall BANT Score')
+                plt.ylabel('Number of Companies')
+                plt.tight_layout()
+                st.pyplot(plt)
+            else:
+                logger.warning("'Overall BANT Score' column missing in company_bant_df.")
+                st.warning("No 'Overall BANT Score' data available for distribution analysis.")
+        
+            # Correlation Heatmap of BANT Scores (Companies)
+            st.markdown("### Correlation Between BANT Components (Companies)")
+            bant_components = ['Average Budget Score', 'Average Authority Score', 'Average Need Score', 'Average Timeline Score', 'Overall BANT Score']
+            if all(component in st.session_state['company_bant_df'].columns for component in bant_components):
+                correlation = st.session_state['company_bant_df'][bant_components].corr()
+                fig, ax = plt.subplots(figsize=(8, 6))
+                sns.heatmap(correlation, annot=True, cmap='coolwarm', ax=ax)
+                plt.title('Correlation Heatmap of BANT Scores (Companies)')
+                plt.tight_layout()
+                st.pyplot(fig)
+            else:
+                missing_components = [comp for comp in bant_components if comp not in st.session_state['company_bant_df'].columns]
+                logger.warning(f"Missing columns for correlation heatmap: {missing_components}")
+                st.warning(f"Missing columns for correlation heatmap: {', '.join(missing_components)}")
+        
+            # Recommendations Breakdown (Companies)
+            st.markdown("### Recommendations Breakdown (Companies)")
+            if 'Recommendations' in st.session_state['company_bant_df'].columns:
+                recommendations_counts = st.session_state['company_bant_df']['Recommendations'].value_counts()
+                fig, ax = plt.subplots(figsize=(8, 6))
+                sns.barplot(x=recommendations_counts.index, y=recommendations_counts.values, palette='magma')
+                plt.title('Recommendations Distribution (Companies)')
+                plt.xlabel('Recommendation')
+                plt.ylabel('Number of Companies')
+                plt.xticks(rotation=45)
+                plt.tight_layout()
+                st.pyplot(fig)
+            else:
+                logger.warning("'Recommendations' column missing in company_bant_df.")
+                st.warning("No 'Recommendations' data available for companies.")
+        
+        else:
+            st.warning("No company-level BANT analysis data available. Please perform BANT ranking first.")
+        
+        # ------------------------------
+        # Individual-Level Analytics
+        # ------------------------------
+        if 'person_leads_df' in st.session_state and not st.session_state['person_leads_df'].empty:
+            # Distribution of Overall BANT Scores (Individuals)
+            st.markdown("### Distribution of Overall BANT Scores (Individuals)")
+            if 'Overall BANT Score' in st.session_state['person_leads_df'].columns:
+                plt.figure(figsize=(10, 6))
+                sns.histplot(
+                    st.session_state['person_leads_df']['Overall BANT Score'],
+                    bins=10,
+                    kde=True,
+                    color='skyblue'
+                )
+                plt.title('Distribution of Overall BANT Scores (Individuals)')
+                plt.xlabel('Overall BANT Score')
+                plt.ylabel('Number of Individuals')
+                plt.tight_layout()
+                st.pyplot(plt)
+            else:
+                logger.warning("'Overall BANT Score' column missing in person_leads_df.")
+                st.warning("No 'Overall BANT Score' data available for individual distribution analysis.")
+        
+            # Recommendations Breakdown (Individuals)
+            st.markdown("### Recommendations Breakdown (Individuals)")
+            if 'Recommendations' in st.session_state['person_leads_df'].columns:
+                individual_recommendations = st.session_state['person_leads_df']['Recommendations'].value_counts()
+                fig, ax = plt.subplots(figsize=(8, 6))
+                sns.barplot(x=individual_recommendations.index, y=individual_recommendations.values, palette='coolwarm')
+                plt.title('Recommendations Distribution (Individuals)')
+                plt.xlabel('Recommendation')
+                plt.ylabel('Number of Individuals')
+                plt.xticks(rotation=45)
+                plt.tight_layout()
+                st.pyplot(fig)
+            else:
+                logger.warning("'Recommendations' column missing in person_leads_df.")
+                st.warning("No 'Recommendations' data available for individuals.")
+        
+            # Correlation Heatmap of BANT Scores (Individuals)
+            st.markdown("### Correlation Between BANT Components (Individuals)")
+            bant_components_individual = ['Budget Score', 'Authority Score', 'Need Score', 'Timeline Score', 'Overall BANT Score']
+            if all(component in st.session_state['person_leads_df'].columns for component in bant_components_individual):
+                correlation_individual = st.session_state['person_leads_df'][bant_components_individual].corr()
+                fig, ax = plt.subplots(figsize=(8, 6))
+                sns.heatmap(correlation_individual, annot=True, cmap='coolwarm', ax=ax)
+                plt.title('Correlation Heatmap of BANT Scores (Individuals)')
+                plt.tight_layout()
+                st.pyplot(fig)
+            else:
+                missing_components_individual = [comp for comp in bant_components_individual if comp not in st.session_state['person_leads_df'].columns]
+                logger.warning(f"Missing columns for individual correlation heatmap: {missing_components_individual}")
+                st.warning(f"Missing columns for individual correlation heatmap: {', '.join(missing_components_individual)}")
+        
+            # Number of Phone Numbers and Emails per Individual
+            st.markdown("### Number of Phone Numbers and Emails per Individual")
+            if 'Contacts' in st.session_state['person_leads_df'].columns:
+                def count_emails_and_phones_individual(contacts_entry):
+                    num_emails = 0
+                    num_phones = 0
+                    if isinstance(contacts_entry, str):
+                        try:
+                            contacts_list = json.loads(contacts_entry)
+                        except json.JSONDecodeError:
+                            contacts_list = []
+                    elif isinstance(contacts_entry, list):
+                        contacts_list = contacts_entry
+                    else:
+                        contacts_list = []
+                    for contact in contacts_list:
+                        email = contact.get('Email')
+                        if email and email.strip().lower() not in ['not provided', 'not available', '']:
+                            num_emails += 1
+                        phone = contact.get('Phone Number')
+                        if phone and phone.strip().lower() not in ['not provided', 'not available', '']:
+                            num_phones += 1
+                    return pd.Series({'Num Emails': num_emails, 'Num Phones': num_phones})
+                
+                contacts_counts_individual = st.session_state['person_leads_df']['Contacts'].apply(count_emails_and_phones_individual)
+                st.session_state['person_leads_df'] = st.session_state['person_leads_df'].join(
+                    contacts_counts_individual, rsuffix='_new'
+                )
+                
+                # Display the counts in a table
                 try:
-                    person_leads_df = pd.DataFrame(person_leads)
-                    st.session_state['person_leads_df'] = person_leads_df
-                    st.success("Person information scraped successfully!")
-                    logger.info("Person information scraped successfully.")
-                except Exception as e:
-                    logger.error(f"Error creating person_leads_df: {e}")
-                    st.error(f"Error processing scraped person information: {e}")
+                    st.write("#### Emails and Phone Numbers per Individual")
+                    st.write(st.session_state['person_leads_df'][['Name', 'Num Emails', 'Num Phones']])
+                except KeyError:
+                    logger.error("'Name', 'Num Emails', or 'Num Phones' columns missing in person_leads_df.")
+                    st.error("Required columns for individual contact analysis are missing.")
+                    st.stop()
+                
+                # Plot number of emails and phone numbers per individual
+                fig, ax = plt.subplots(figsize=(10, 6))
+                x = np.arange(len(st.session_state['person_leads_df']))
+                width = 0.35
+                try:
+                    ax.bar(x - width/2, st.session_state['person_leads_df']['Num Emails'], width, label='Emails')
+                    ax.bar(x + width/2, st.session_state['person_leads_df']['Num Phones'], width, label='Phone Numbers')
+                    ax.set_xlabel('Individual Name')
+                    ax.set_ylabel('Count')
+                    ax.set_title('Number of Emails and Phone Numbers per Individual')
+                    ax.set_xticks(x)
+                    try:
+                        ax.set_xticklabels(st.session_state['person_leads_df']['Name'], rotation=90)
+                    except KeyError:
+                        logger.error("'Name' column missing in person_leads_df when setting x-tick labels.")
+                        ax.set_xticklabels(['Unknown'] * len(x), rotation=90)
+                    ax.legend()
+                    plt.tight_layout()
+                    st.pyplot(fig)
+                except KeyError:
+                    logger.error("'Name', 'Num Emails', or 'Num Phones' columns missing in person_leads_df.")
+                    st.error("Required columns for individual contact plotting are missing.")
                     st.stop()
             else:
-                logger.error("Person information scraping failed.")
-                st.error("Failed to scrape person information. Please check the logs for more details.")
-                st.stop()
-
-    # Display the Person Leads DataFrame if it exists
-    if not st.session_state['person_leads_df'].empty:
-        st.write("### Person Leads Information")
-        display_and_download(
-            df=st.session_state['person_leads_df'],
-            button_label="Person Leads Information",
-            filename="person_leads_info"
-        )
+                logger.warning("No 'Contacts' data available in person_leads_df.")
+                st.warning("No 'Contacts' data available for individual contact analysis.")
+        
+            # Number of Individual Names per Company
+            st.markdown("### Number of Individual Names per Company")
+            if 'Entity' in st.session_state['person_leads_df'].columns and 'Entity' in st.session_state['person_leads_df'].columns:
+                def count_individual_names(row):
+                    names = set()
+                    # From CEO/PI
+                    ceo_pi = row.get('CEO/PI')
+                    if isinstance(ceo_pi, str) and ceo_pi.strip() and ceo_pi.strip().lower() != 'not available':
+                        names.add(ceo_pi.strip())
+                    # From Researchers
+                    researchers = row.get('Researchers')
+                    if isinstance(researchers, list):
+                        names.update([r for r in researchers if isinstance(r, str) and r.strip().lower() != 'not available'])
+                    elif isinstance(researchers, str) and researchers.strip() and researchers.strip().lower() != 'not available':
+                        names.add(researchers.strip())
+                    # From Contacts
+                    contacts = row.get('Contacts')
+                    if isinstance(contacts, str):
+                        try:
+                            contacts_list = json.loads(contacts)
+                        except json.JSONDecodeError:
+                            contacts_list = []
+                    elif isinstance(contacts, list):
+                        contacts_list = contacts
+                    else:
+                        contacts_list = []
+                    for contact in contacts_list:
+                        name = contact.get('Name')
+                        if isinstance(name, str) and name.strip().lower() != 'not available':
+                            names.add(name.strip())
+                    return len(names)
+                
+                try:
+                    st.session_state['company_bant_df']['Num Individuals'] = st.session_state['company_bant_df'].apply(
+                        lambda row: st.session_state['person_leads_df'][st.session_state['person_leads_df']['Name'] == row['Name']].shape[0],
+                        axis=1
+                    )
+                    
+                    # Display the counts in a table
+                    try:
+                        st.write("#### Number of Individual Names per Company")
+                        st.write(st.session_state['company_bant_df'][['Name', 'Num Individuals']])
+                    except KeyError:
+                        logger.error("'Name' or 'Num Individuals' columns missing in company_bant_df.")
+                        st.error("Required columns for individual names count are missing.")
+                        st.stop()
+                    
+                    # Plot number of individuals per company
+                    try:
+                        fig, ax = plt.subplots(figsize=(10, 6))
+                        sns.barplot(
+                            data=st.session_state['company_bant_df'],
+                            x='Entity',
+                            y='Num Individuals',
+                            palette='deep'
+                        )
+                        ax.set_xlabel('Entity')
+                        ax.set_ylabel('Number of Individuals')
+                        ax.set_title('Number of Individual Names per Company')
+                        plt.xticks(rotation=90)
+                        plt.tight_layout()
+                        st.pyplot(fig)
+                    except KeyError:
+                        logger.error("'Name' or 'Num Individuals' columns missing in company_bant_df.")
+                        st.error("Required columns for individual names plotting are missing.")
+                        st.stop()
+                except Exception as e:
+                    logger.error(f"Error counting individual names per company: {e}")
+                    st.error(f"Error counting individual names per company: {e}")
+                    st.stop()
+            else:
+                logger.warning("'Name' or 'Name' columns missing in person_leads_df.")
+                st.warning("Required columns for individual names per company analysis are missing.")
+        
+            # Summaries
+            if 'Summary' in st.session_state['company_bant_df'].columns:
+                st.markdown("### Summaries")
+                for idx, row in st.session_state['company_bant_df'].iterrows():
+                    company_name = row['Entity']
+                    summary = row['Summary']
+                    if pd.notnull(summary) and summary.strip():
+                        st.write(f"**{company_name}:** {summary}")
+                    else:
+                        st.write(f"**{company_name}:** No summary available.")
+                    st.markdown("---")
+        
+                # Word Cloud for Summaries
+                summaries = st.session_state['company_bant_df']['Summary'].dropna().tolist()
+                combined_text = ' '.join(summaries)
+                if combined_text:
+                    st.markdown("### Word Cloud for Summaries")
+                    wordcloud = WordCloud(width=800, height=400, background_color='white').generate(combined_text)
+                    fig, ax = plt.subplots(figsize=(10, 5))
+                    ax.imshow(wordcloud, interpolation='bilinear')
+                    ax.axis('off')
+                    plt.tight_layout()
+                    st.pyplot(fig)
+                else:
+                    logger.warning("No summaries available for word cloud.")
+                    st.warning("No summaries available to generate a word cloud.")
+            else:
+                logger.warning("'Summary' column missing in company_bant_df.")
+                st.warning("No 'Summary' data available for summaries and word cloud.")
+        
+        # ------------------------------
+        # Additional Individual-Level Analytics
+        # ------------------------------
+        if 'person_leads_df' in st.session_state and not st.session_state['person_leads_df'].empty:
+            # Number of Grants per Individual
+            if 'Grants' in st.session_state['person_leads_df'].columns:
+                st.markdown("### Number of Grants per Individual")
+                
+                def count_grants_individual(grants_entry):
+                    if isinstance(grants_entry, list):
+                        return len(grants_entry)
+                    elif isinstance(grants_entry, str) and grants_entry.strip():
+                        return 1
+                    else:
+                        return 0
+                
+                st.session_state['person_leads_df']['Grant Count'] = st.session_state['person_leads_df']['Grants'].apply(count_grants_individual)
+                
+                # Plotting Number of Grants per Individual
+                fig, ax = plt.subplots(figsize=(10, 6))
+                sns.barplot(
+                    data=st.session_state['person_leads_df'],
+                    x='Name',
+                    y='Grant Count',
+                    palette='inferno'
+                )
+                ax.set_xlabel('Individual Name')
+                ax.set_ylabel('Number of Grants')
+                ax.set_title('Number of Grants per Individual')
+                plt.xticks(rotation=90)
+                plt.tight_layout()
+                st.pyplot(fig)
+            else:
+                logger.warning("'Grants' column missing in person_leads_df.")
+                st.warning("No 'Grants' data available for individual grants analysis.")
+        
+            # Distribution of Overall BANT Scores (Individuals)
+            st.markdown("### Distribution of Overall BANT Scores (Individuals)")
+            if 'Overall BANT Score' in st.session_state['person_leads_df'].columns:
+                plt.figure(figsize=(10, 6))
+                sns.histplot(
+                    st.session_state['person_leads_df']['Overall BANT Score'],
+                    bins=10,
+                    kde=True,
+                    color='lightgreen'
+                )
+                plt.title('Distribution of Overall BANT Scores (Individuals)')
+                plt.xlabel('Overall BANT Score')
+                plt.ylabel('Number of Individuals')
+                plt.tight_layout()
+                st.pyplot(plt)
+            else:
+                logger.warning("'Overall BANT Score' column missing in person_leads_df.")
+                st.warning("No 'Overall BANT Score' data available for individual distribution analysis.")
+        
+            # Recommendations Breakdown (Individuals)
+            st.markdown("### Recommendations Breakdown (Individuals)")
+            if 'Recommendations' in st.session_state['person_leads_df'].columns:
+                individual_recommendations = st.session_state['person_leads_df']['Recommendations'].value_counts()
+                fig, ax = plt.subplots(figsize=(8, 6))
+                sns.barplot(
+                    x=individual_recommendations.index,
+                    y=individual_recommendations.values,
+                    palette='viridis'
+                )
+                plt.title('Recommendations Distribution (Individuals)')
+                plt.xlabel('Recommendation')
+                plt.ylabel('Number of Individuals')
+                plt.xticks(rotation=45)
+                plt.tight_layout()
+                st.pyplot(fig)
+            else:
+                logger.warning("'Recommendations' column missing in person_leads_df.")
+                st.warning("No 'Recommendations' data available for individuals.")
+        
+            # Correlation Heatmap of BANT Scores (Individuals)
+            st.markdown("### Correlation Between BANT Components (Individuals)")
+            bant_components_individual = ['Budget Score', 'Authority Score', 'Need Score', 'Timeline Score', 'Overall BANT Score']
+            if all(component in st.session_state['person_leads_df'].columns for component in bant_components_individual):
+                correlation_individual = st.session_state['person_leads_df'][bant_components_individual].corr()
+                fig, ax = plt.subplots(figsize=(8, 6))
+                sns.heatmap(correlation_individual, annot=True, cmap='coolwarm', ax=ax)
+                plt.title('Correlation Heatmap of BANT Scores (Individuals)')
+                plt.tight_layout()
+                st.pyplot(fig)
+            else:
+                missing_components_individual = [comp for comp in bant_components_individual if comp not in st.session_state['person_leads_df'].columns]
+                logger.warning(f"Missing columns for individual correlation heatmap: {missing_components_individual}")
+                st.warning(f"Missing columns for individual correlation heatmap: {', '.join(missing_components_individual)}")
+        
+            # Number of Phone Numbers and Emails per Individual
+            st.markdown("### Number of Phone Numbers and Emails per Individual")
+            if 'Contacts' in st.session_state['person_leads_df'].columns:
+                def count_emails_and_phones_individual(contacts_entry):
+                    num_emails = 0
+                    num_phones = 0
+                    if isinstance(contacts_entry, str):
+                        try:
+                            contacts_list = json.loads(contacts_entry)
+                        except json.JSONDecodeError:
+                            contacts_list = []
+                    elif isinstance(contacts_entry, list):
+                        contacts_list = contacts_entry
+                    else:
+                        contacts_list = []
+                    for contact in contacts_list:
+                        email = contact.get('Email')
+                        if email and email.strip().lower() not in ['not provided', 'not available', '']:
+                            num_emails += 1
+                        phone = contact.get('Phone Number')
+                        if phone and phone.strip().lower() not in ['not provided', 'not available', '']:
+                            num_phones += 1
+                    return pd.Series({'Num Emails': num_emails, 'Num Phones': num_phones})
+                
+                try:
+                    contacts_counts_individual = st.session_state['person_leads_df']['Contacts'].apply(count_emails_and_phones_individual)
+                    st.session_state['person_leads_df'] = st.session_state['person_leads_df'].join(
+                        contacts_counts_individual, rsuffix='_new'
+                    )
+                    
+                    # Display the counts in a table
+                    try:
+                        st.write("#### Emails and Phone Numbers per Individual")
+                        st.write(st.session_state['person_leads_df'][['Name', 'Num Emails', 'Num Phones']])
+                    except KeyError:
+                        logger.error("'Name', 'Num Emails', or 'Num Phones' columns missing in person_leads_df.")
+                        st.error("Required columns for individual contact analysis are missing.")
+                        st.stop()
+                    
+                    # Plot number of emails and phone numbers per individual
+                    fig, ax = plt.subplots(figsize=(10, 6))
+                    sns.barplot(
+                        data=st.session_state['person_leads_df'],
+                        x='Entity',
+                        y='Num Emails',
+                        color='steelblue',
+                        label='Emails'
+                    )
+                    sns.barplot(
+                        data=st.session_state['person_leads_df'],
+                        x='Name',
+                        y='Num Phones',
+                        color='orange',
+                        label='Phone Numbers'
+                    )
+                    ax.set_xlabel('Individual Name')
+                    ax.set_ylabel('Count')
+                    ax.set_title('Number of Emails and Phone Numbers per Individual')
+                    plt.xticks(rotation=90)
+                    plt.legend()
+                    plt.tight_layout()
+                    st.pyplot(fig)
+                except KeyError:
+                    logger.error("'Name', 'Contacts', 'Num Emails', or 'Num Phones' columns missing in person_leads_df.")
+                    st.error("Required columns for individual contact analysis are missing.")
+                    st.stop()
+                except Exception as e:
+                    logger.error(f"Error during individual contact analysis: {e}")
+                    st.error(f"Error during individual contact analysis: {e}")
+                    st.stop()
+            else:
+                logger.warning("'Contacts' column missing in person_leads_df.")
+                st.warning("No 'Contacts' data available for individual contact analysis.")
+        
+            # Number of Individual Names per Company
+            st.markdown("### Number of Individual Names per Company")
+            if 'Name' in st.session_state['person_leads_df'].columns and 'Name' in st.session_state['person_leads_df'].columns:
+                try:
+                    individuals_per_company = st.session_state['person_leads_df'].groupby('Name')['Name'].nunique().reset_index()
+                    individuals_per_company = individuals_per_company.rename(columns={'Name': 'Num Individuals'})
+                    
+                    st.write("#### Number of Individual Names per Company")
+                    st.write(individuals_per_company)
+                    
+                    # Plot number of individuals per company
+                    fig, ax = plt.subplots(figsize=(10, 6))
+                    sns.barplot(
+                        data=individuals_per_company,
+                        x='Entity',
+                        y='Num Individuals',
+                        palette='coolwarm'
+                    )
+                    ax.set_xlabel('Name')
+                    ax.set_ylabel('Number of Individuals')
+                    ax.set_title('Number of Individual Names per Company')
+                    plt.xticks(rotation=90)
+                    plt.tight_layout()
+                    st.pyplot(fig)
+                except Exception as e:
+                    logger.error(f"Error counting individual names per company: {e}")
+                    st.error(f"Error counting individual names per company: {e}")
+                    st.stop()
+            else:
+                logger.warning("'Name' or 'Name' columns missing in person_leads_df.")
+                st.warning("Required columns for individual names per company analysis are missing.")
+        
+            # Summaries and Word Cloud for Companies
+            if 'Summary' in st.session_state['company_bant_df'].columns:
+                st.markdown("### Summaries")
+                for idx, row in st.session_state['company_bant_df'].iterrows():
+                    company_name = row['Entity']
+                    summary = row['Summary']
+                    if pd.notnull(summary) and summary.strip():
+                        st.write(f"**{company_name}:** {summary}")
+                    else:
+                        st.write(f"**{company_name}:** No summary available.")
+                    st.markdown("---")
+        
+                # Word Cloud for Summaries
+                summaries = st.session_state['company_bant_df']['Summary'].dropna().tolist()
+                combined_text = ' '.join(summaries)
+                if combined_text:
+                    st.markdown("### Word Cloud for Summaries")
+                    wordcloud = WordCloud(width=800, height=400, background_color='white').generate(combined_text)
+                    fig, ax = plt.subplots(figsize=(10, 5))
+                    ax.imshow(wordcloud, interpolation='bilinear')
+                    ax.axis('off')
+                    plt.tight_layout()
+                    st.pyplot(fig)
+                else:
+                    logger.warning("No summaries available for word cloud.")
+                    st.warning("No summaries available to generate a word cloud.")
+            else:
+                logger.warning("'Summary' column missing in company_bant_df.")
+                st.warning("No 'Summary' data available for summaries and word cloud.")
+        
+        # ------------------------------
+        # Additional Individual-Level Analytics
+        # ------------------------------
+        if 'person_leads_df' in st.session_state and not st.session_state['person_leads_df'].empty:
+            # Number of Grants per Individual
+            if 'Grants' in st.session_state['person_leads_df'].columns:
+                st.markdown("### Number of Grants per Individual")
+                
+                def count_grants_individual(grants_entry):
+                    if isinstance(grants_entry, list):
+                        return len(grants_entry)
+                    elif isinstance(grants_entry, str) and grants_entry.strip():
+                        return 1
+                    else:
+                        return 0
+                
+                st.session_state['person_leads_df']['Grant Count'] = st.session_state['person_leads_df']['Grants'].apply(count_grants_individual)
+                
+                # Plotting Number of Grants per Individual
+                fig, ax = plt.subplots(figsize=(10, 6))
+                sns.barplot(
+                    data=st.session_state['person_leads_df'],
+                    x='Name',
+                    y='Grant Count',
+                    palette='inferno'
+                )
+                ax.set_xlabel('Individual Name')
+                ax.set_ylabel('Number of Grants')
+                ax.set_title('Number of Grants per Individual')
+                plt.xticks(rotation=90)
+                plt.tight_layout()
+                st.pyplot(fig)
+            else:
+                logger.warning("'Grants' column missing in person_leads_df.")
+                st.warning("No 'Grants' data available for individual grants analysis.")
+        
+            # Distribution of Overall BANT Scores (Individuals)
+            st.markdown("### Distribution of Overall BANT Scores (Individuals)")
+            if 'Overall BANT Score' in st.session_state['person_leads_df'].columns:
+                plt.figure(figsize=(10, 6))
+                sns.histplot(
+                    st.session_state['person_leads_df']['Overall BANT Score'],
+                    bins=10,
+                    kde=True,
+                    color='lightgreen'
+                )
+                plt.title('Distribution of Overall BANT Scores (Individuals)')
+                plt.xlabel('Overall BANT Score')
+                plt.ylabel('Number of Individuals')
+                plt.tight_layout()
+                st.pyplot(plt)
+            else:
+                logger.warning("'Overall BANT Score' column missing in person_leads_df.")
+                st.warning("No 'Overall BANT Score' data available for individual distribution analysis.")
+        
+            # Recommendations Breakdown (Individuals)
+            st.markdown("### Recommendations Breakdown (Individuals)")
+            if 'Recommendations' in st.session_state['person_leads_df'].columns:
+                individual_recommendations = st.session_state['person_leads_df']['Recommendations'].value_counts()
+                fig, ax = plt.subplots(figsize=(8, 6))
+                sns.barplot(
+                    x=individual_recommendations.index,
+                    y=individual_recommendations.values,
+                    palette='viridis'
+                )
+                plt.title('Recommendations Distribution (Individuals)')
+                plt.xlabel('Recommendation')
+                plt.ylabel('Number of Individuals')
+                plt.xticks(rotation=45)
+                plt.tight_layout()
+                st.pyplot(fig)
+            else:
+                logger.warning("'Recommendations' column missing in person_leads_df.")
+                st.warning("No 'Recommendations' data available for individuals.")
+        
+            # Correlation Heatmap of BANT Scores (Individuals)
+            st.markdown("### Correlation Between BANT Components (Individuals)")
+            bant_components_individual = ['Budget Score', 'Authority Score', 'Need Score', 'Timeline Score', 'Overall BANT Score']
+            if all(component in st.session_state['person_leads_df'].columns for component in bant_components_individual):
+                correlation_individual = st.session_state['person_leads_df'][bant_components_individual].corr()
+                fig, ax = plt.subplots(figsize=(8, 6))
+                sns.heatmap(correlation_individual, annot=True, cmap='coolwarm', ax=ax)
+                plt.title('Correlation Heatmap of BANT Scores (Individuals)')
+                plt.tight_layout()
+                st.pyplot(fig)
+            else:
+                missing_components_individual = [comp for comp in bant_components_individual if comp not in st.session_state['person_leads_df'].columns]
+                logger.warning(f"Missing columns for individual correlation heatmap: {missing_components_individual}")
+                st.warning(f"Missing columns for individual correlation heatmap: {', '.join(missing_components_individual)}")
+        
+            # Number of Phone Numbers and Emails per Individual
+            st.markdown("### Number of Phone Numbers and Emails per Individual")
+            if 'Contacts' in st.session_state['person_leads_df'].columns:
+                def count_emails_and_phones_individual(contacts_entry):
+                    num_emails = 0
+                    num_phones = 0
+                    if isinstance(contacts_entry, str):
+                        try:
+                            contacts_list = json.loads(contacts_entry)
+                        except json.JSONDecodeError:
+                            contacts_list = []
+                    elif isinstance(contacts_entry, list):
+                        contacts_list = contacts_entry
+                    else:
+                        contacts_list = []
+                    for contact in contacts_list:
+                        email = contact.get('Email')
+                        if email and email.strip().lower() not in ['not provided', 'not available', '']:
+                            num_emails += 1
+                        phone = contact.get('Phone Number')
+                        if phone and phone.strip().lower() not in ['not provided', 'not available', '']:
+                            num_phones += 1
+                    return pd.Series({'Num Emails': num_emails, 'Num Phones': num_phones})
+                
+                try:
+                    contacts_counts_individual = st.session_state['person_leads_df']['Contacts'].apply(count_emails_and_phones_individual)
+                    st.session_state['person_leads_df'] = st.session_state['person_leads_df'].join(
+                        contacts_counts_individual, rsuffix='_new'
+                    )
+                    
+                    # Display the counts in a table
+                    try:
+                        st.write("#### Emails and Phone Numbers per Individual")
+                        st.write(st.session_state['person_leads_df'][['Name', 'Num Emails', 'Num Phones']])
+                    except KeyError:
+                        logger.error("'Name', 'Num Emails', or 'Num Phones' columns missing in person_leads_df.")
+                        st.error("Required columns for individual contact analysis are missing.")
+                        st.stop()
+                    
+                    # Plot number of emails and phone numbers per individual
+                    fig, ax = plt.subplots(figsize=(10, 6))
+                    sns.barplot(
+                        data=st.session_state['person_leads_df'],
+                        x='Name',
+                        y='Num Emails',
+                        color='steelblue',
+                        label='Emails'
+                    )
+                    sns.barplot(
+                        data=st.session_state['person_leads_df'],
+                        x='Name',
+                        y='Num Phones',
+                        color='orange',
+                        label='Phone Numbers'
+                    )
+                    ax.set_xlabel('Individual Name')
+                    ax.set_ylabel('Count')
+                    ax.set_title('Number of Emails and Phone Numbers per Individual')
+                    plt.xticks(rotation=90)
+                    plt.legend()
+                    plt.tight_layout()
+                    st.pyplot(fig)
+                except KeyError:
+                    logger.error("'Name', 'Contacts', 'Num Emails', or 'Num Phones' columns missing in person_leads_df.")
+                    st.error("Required columns for individual contact analysis are missing.")
+                    st.stop()
+                except Exception as e:
+                    logger.error(f"Error during individual contact analysis: {e}")
+                    st.error(f"Error during individual contact analysis: {e}")
+                    st.stop()
+            else:
+                logger.warning("'Contacts' column missing in person_leads_df.")
+                st.warning("No 'Contacts' data available for individual contact analysis.")
+        
+        else:
+            st.warning("No individual-level BANT analysis data available. Please perform BANT ranking first.")
 
 def author_papers_section():
     """
     Section for Author Papers: Fetch, summarize, and visualize author papers and co-authors.
     """
     st.subheader("Author Papers and Network Visualization")
-    
-    # Check if person leads are available
-    if 'person_leads_df' not in st.session_state or st.session_state['person_leads_df'].empty:
-        st.warning("No persons available. Please extract and scrape persons first.")
-        if st.button("Go to Extract Persons"):
-            st.session_state['menu_selection'] = "Extract Persons"
-        return
     
     authors = st.session_state['person_leads_df']['Name'].unique().tolist()
     
@@ -859,7 +1293,7 @@ def author_papers_section():
     search_btn = st.button("Search Person", key='search_person_btn')
     
     if search_btn:
-        if not st.session_state.get('context_input', '').strip():
+        if not st.session_state.get('context', '').strip():
                 logger.error("Lead generation attempted with empty context.")
                 st.warning("Please provide a context for lead generation.")
         if not search_name.strip():
@@ -943,21 +1377,18 @@ def author_papers_section():
             }
         
         # Calculate relevance using llm
-        relevance_scores = calculate_relevance_with_llm(authors_info, st.session_state.get('context_input', ''))
+        relevance_scores = calculate_relevance_with_llm(authors_info, st.session_state.get('context', ''))
         
         # Build Network Graph with relevance scores
         G = build_network_graph_with_relevance(authors_info, relevance_scores)
         
         # Visualize the Network Graph with enhancements
-        visualize_network(G, selected_author, context=st.session_state.get('context_input', ''))
+        visualize_network(G, selected_author, context=st.session_state.get('context', ''))
         
         # Display Information Cards
         display_author_information_cards(G, selected_author)
 
 def download_data_section():
-    """
-    Section for Download Data: Download different datasets including BANT reports.
-    """
     st.subheader("Download Data")
     
     # Option to download Leads Information
@@ -967,21 +1398,24 @@ def download_data_section():
         if download_leads_btn:
             try:
                 download_leads(st.session_state['leads_info_df'], "leads_info")
-                st.success("Leads information downloaded successfully!")
-                logger.info("Leads information downloaded successfully.")
+                st.success("Leads information section downloaded successfully!")
+                logger.info("Leads information section downloaded successfully.")
             except Exception as e:
                 logger.error(f"Error downloading leads_info: {e}")
                 st.error(f"Error downloading leads information: {e}")
                 st.stop()
     
     # Option to download Ranked Leads with BANT
-    if not st.session_state['ranked_leads_df'].empty:
+    if 'company_bant_df' in st.session_state and not st.session_state['company_bant_df'].empty:
         st.markdown("### Download Ranked Leads with BANT Scores")
         ranked_download_btn = st.button("Download Ranked Leads with BANT", key='download_ranked_bant_btn')
         if ranked_download_btn:
             try:
-                # Generate the BANT report
-                bant_report = generate_bant_report(st.session_state['ranked_leads_df'])
+                # Generate the BANT report with both individual and company data
+                bant_report = generate_bant_report(
+                    st.session_state['person_leads_df'],
+                    st.session_state['company_bant_df']
+                )
                 if bant_report:
                     st.download_button(
                         label="Download BANT Report as Excel",
@@ -1021,6 +1455,20 @@ def download_data_section():
                     st.error(f"Error downloading person leads: {e}")
                     st.stop()
     
+    # Option to download Company BANT Scores
+    if 'company_bant_df' in st.session_state and not st.session_state['company_bant_df'].empty:
+        st.markdown("### Download Company BANT Scores")
+        company_bant_download_btn = st.button("Download Company BANT Scores", key='download_company_bant_btn')
+        if company_bant_download_btn:
+            try:
+                download_leads(st.session_state['company_bant_df'], "company_bant_scores")
+                st.success("Company BANT scores downloaded successfully!")
+                logger.info("Company BANT scores downloaded successfully.")
+            except Exception as e:
+                logger.error(f"Error downloading company_bant_df: {e}")
+                st.error(f"Error downloading company BANT scores: {e}")
+                st.stop()
+    
     # Option to download all data together (ZIP functionality can be implemented as needed)
     st.markdown("### Download All Data")
     all_download_btn = st.button("Download All Data as ZIP", key='download_all_data_btn')
@@ -1029,77 +1477,65 @@ def download_data_section():
         st.warning("ZIP download functionality is not implemented yet.")
 
 def rank_leads_section():
-    """
-    Section for Rank Leads: Rank the Leads based on BANT analysis.
-    """
     st.subheader("Rank the Leads using BANT Analysis")
-
+    
     # Retrieve context from session_state
     context = st.session_state.get('context', '')
-
+    
     if not context.strip():
         st.warning("No context provided. Please go back to 'Input Leads' to provide context.")
         if st.button("Go to Input Leads"):
             st.session_state['menu_selection'] = "Input Leads"
-            st.rerun()
+            st.experimental_rerun()
         return
-
+    
     st.markdown("**Context for BANT Analysis:**")
-    st.text_area("Context for BANT analysis:", value=context, height=150, key='bant_context_input', disabled=True)
-
+    st.text_area("Context for BANT analysis:", value=context, height=150, key='bant_context', disabled=True)
+    
     rank_btn = st.button("Perform BANT Analysis and Rank Leads", key='bant_rank_leads_btn')
     if rank_btn:
-        if st.session_state['leads_info_df'].empty:
-            logger.error("Lead ranking attempted without lead information.")
-            st.error("No lead information available. Please scrape lead information first.")
-            st.stop()
+        if st.session_state['person_leads_df'].empty:
+            logger.error("Lead ranking attempted without person leads information.")
+            st.error("No person leads information available. Please scrape lead information first.")
+            return
         else:
             with st.spinner('Performing BANT analysis and ranking leads...'):
-                ranked_leads_df = rank_leads_with_bant(st.session_state['leads_info_df'], context)
-                st.session_state['ranked_leads_df'] = ranked_leads_df
-                st.success("Leads ranked successfully based on BANT analysis!")
-                logger.info("Leads ranked successfully using BANT analysis.")
-
-    # Display the Ranked Leads DataFrame if it exists
-    if not st.session_state['ranked_leads_df'].empty:
-        st.write("### Ranked Leads with BANT Scores")
-        try:
-            display_leads_df = st.session_state['ranked_leads_df']
-            # Select relevant columns for display
-            display_columns = ["Company/Group Name", "Category", "Budget Score", "Authority Score",
-                               "Need Score", "Timeline Score", "Overall BANT Score", "Recommendations"]
-            st.dataframe(display_leads_df[display_columns], height=600)
-
-            # Provide download options
-            csv = display_leads_df.to_csv(index=False).encode('utf-8')
-            excel_buffer = BytesIO()
-            try:
-                with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                    display_leads_df.to_excel(writer, index=False)
-                excel_data = excel_buffer.getvalue()
-            except Exception as e:
-                logger.error(f"Error converting ranked_leads_df to Excel: {e}")
-                excel_data = None
-
-            st.download_button(
-                label="Download Ranked Leads as CSV",
-                data=csv,
-                file_name="ranked_leads_bant.csv",
-                mime='text/csv'
-            )
-
-            if excel_data:
-                st.download_button(
-                    label="Download Ranked Leads as Excel",
-                    data=excel_data,
-                    file_name="ranked_leads_bant.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                person_leads_df, company_bant_df = rank_leads_with_bant(
+                    st.session_state['leads_info_df'],
+                    st.session_state['person_leads_df'],
+                    st.session_state.get('context', '')
                 )
+                st.session_state['person_leads_df'] = person_leads_df
+                st.session_state['company_bant_df'] = company_bant_df
+                st.success("BANT analysis and ranking completed successfully!")
+                logger.info("BANT analysis and ranking completed successfully.")
+    
+    # Display the Company-Level BANT DataFrame
+    if 'company_bant_df' in st.session_state and not st.session_state['company_bant_df'].empty:
+        st.write("### Company-Level BANT Scores and Recommendations")
+        try:
+            company_bant_df = st.session_state['company_bant_df']
+            display_and_download(
+                df=company_bant_df,
+                button_label="Company BANT Scores",
+                filename="company_bant_scores"
+            )
         except Exception as e:
-            logger.error(f"Error displaying ranked_leads_df: {e}")
-            st.error(f"Error displaying ranked leads: {e}")
-            st.stop()
-
+            logger.error(f"Error displaying company_bant_df: {e}")
+            st.error(f"Error displaying company BANT scores: {e}")
+            return
+    
+    # Display the Individual-Level BANT DataFrame
+    if not st.session_state['person_leads_df'].empty:
+        st.write("### Individual-Level BANT Scores and Recommendations")
+        display_lead_information(
+            df=st.session_state['person_leads_df'],
+            button_label="Individual BANT Scores",
+            filename="individual_bant_scores"
+        )
+    
+    st.session_state['rank_leads_bant'] = True
+    st.success("Rank Leads section loaded successfully!")
 
 def display_and_download(df, button_label, filename, height=400):
     """
@@ -1149,10 +1585,9 @@ st.sidebar.info(
     This application helps in generating, scraping, ranking, and analyzing leads. Navigate through the menu to perform different tasks.
 
     - **Input Leads:** Generate or manually add leads.
-    - **Scrape Lead Information:** Fetch detailed information about each lead.
+    - **Analyse Lead Information:** Fetch detailed information about each lead.
     - **Rank Leads:** Prioritize leads based on configurable weights.
     - **Analytics:** Visualize and analyze lead data.
-    - **Extract Persons:** Extract and gather information about individuals associated with leads.
     - **Author Papers:** Analyze authors' papers and visualize co-authorship networks.
     - **Download Data:** Download the processed data in various formats.
     """
@@ -1161,14 +1596,12 @@ st.sidebar.info(
 # Navigation Menu
 if st.session_state['menu_selection'] == "Input Leads":
     input_leads()
-elif st.session_state['menu_selection'] == "Scrape Lead Information":
+elif st.session_state['menu_selection'] == "Analyse Lead Information":
     scrape_lead_information()
 elif st.session_state['menu_selection'] == "Rank Leads (BANT)":
     rank_leads_section()
 elif st.session_state['menu_selection'] == "Analytics":
     analytics_section()
-elif st.session_state['menu_selection'] == "Extract Persons":
-    extract_persons_section()
 elif st.session_state['menu_selection'] == "Author Papers":
     author_papers_section()
 elif st.session_state['menu_selection'] == "Download Data":

@@ -34,19 +34,18 @@ load_dotenv()
 
 def display_lead_information(df, button_label, filename, height=400):
     """
-    Displays a DataFrame with lead information and provides options to download it.
-    Includes info boxes explaining the sources and interpretations.
-
-    :param df: DataFrame containing lead information.
-    :param button_label: Label for the download buttons.
-    :param filename: Base filename for downloads.
-    :param height: Height of the displayed DataFrame.
+    Displays the provided DataFrame and provides download options.
+    
+    :param df: The DataFrame to display.
+    :param button_label: The label for the download button.
+    :param filename: The base filename for the downloaded file.
+    :param height: The height of the displayed DataFrame.
     """
     df = clean_dataframe(df)  # Ensure consistent data types
     st.dataframe(df, height=height)
-
+    
     csv = df.to_csv(index=False).encode('utf-8')
-
+    
     excel_buffer = BytesIO()
     try:
         with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
@@ -55,14 +54,14 @@ def display_lead_information(df, button_label, filename, height=400):
     except Exception as e:
         logger.error(f"Error converting DataFrame to Excel: {e}")
         excel_data = None
-
+    
     st.download_button(
         label=f"Download {button_label} as CSV",
         data=csv,
         file_name=f"{filename}.csv",
         mime='text/csv'
     )
-
+    
     if excel_data:
         st.download_button(
             label=f"Download {button_label} as Excel",
@@ -73,50 +72,30 @@ def display_lead_information(df, button_label, filename, height=400):
     
     # Display info boxes for each lead
     for idx, row in df.iterrows():
-        company_name = row.get('Company/Group Name', 'Unknown')
-        sources = row.get('Source URLs', '')
-        if sources and sources != "Not Available":
-            st.info(f"**Sources for {company_name}:** {sources}")
-        else:
-            st.info(f"No sources available for {company_name}.")
-        
-        # Display BANT details if available
-        if 'Budget Score' in row and 'Authority Score' in row and 'Need Score' in row and 'Timeline Score' in row:
-            st.markdown(f"**BANT Scores for {company_name}:**")
-            st.write(f"- **Budget:** {row['Budget Score']:.2f}")
-            st.write(f"- **Authority:** {row['Authority Score']:.2f}")
-            st.write(f"- **Need:** {row['Need Score']:.2f}")
-            st.write(f"- **Timeline:** {row['Timeline Score']:.2f}")
-            st.write(f"- **Overall BANT Score:** {row['Overall BANT Score']:.2f}")
-            st.write(f"**Recommendation:** {row['Recommendations']}")
-        
-        # Display explanations for phone numbers and emails
-        grant_info = row.get('Grant', {})
-        phone_info = row.get('Phone Number', {})
-        email_info = row.get('Email', {})
-        if isinstance(phone_info, dict):
-            phone_number = phone_info.get('number', 'Not Available')
-            phone_purpose = phone_info.get('purpose', 'Not Available')
-            st.markdown(f"**Phone Number:** {phone_number} *(Purpose: {phone_purpose})*")
-        else:
-            st.markdown(f"**Phone Number:** {phone_info}")
-        
-        if isinstance(email_info, dict):
-            email_address = email_info.get('address', 'Not Available')
-            email_purpose = email_info.get('purpose', 'Not Available')
-            st.markdown(f"**Email:** {email_address} *(Purpose: {email_purpose})*")
-        else:
-            st.markdown(f"**Email:** {email_info}")
-
-        grants = row.get("Grants", [])
-        if isinstance(grants, list):
-            for grant in grants:
-                st.markdown(f"- **Grant Name:** {grant.get('Name', 'Not Available')}")
-                st.markdown(f"  - **Amount:** {grant.get('Amount', 'Not Available')}")
-                st.markdown(f"  - **Period:** {grant.get('Period', 'Not Available')}")
-                st.markdown(f"  - **Start Date:** {grant.get('Start Date', 'Not Available')}")
-        else:
-            st.markdown(f"- **Grants:** {grants}")
+        if 'Entity' in row and 'Name' in row:
+            company_name = row.get('Entity', 'Unknown')
+            person_name = row.get('Name', 'Unknown')
+            st.info(f"**Entity:** {company_name}")
+            st.info(f"**Person Name:** {person_name}")
+            # Display other fields as needed
+            # Example:
+            st.info(f"**Current Position:** {row.get('Current Position', 'Not Available')}")
+            st.info(f"**Budget Score:** {row.get('Budget Score', 'Not Available')}")
+            st.info(f"**Authority Score:** {row.get('Authority Score', 'Not Available')}")
+            st.info(f"**Need Score:** {row.get('Need Score', 'Not Available')}")
+            st.info(f"**Timeline Score:** {row.get('Timeline Score', 'Not Available')}")
+            st.info(f"**Overall BANT Score:** {row.get('Overall BANT Score', 'Not Available')}")
+            st.info(f"**Recommendations:** {row.get('Recommendations', 'Not Available')}")
+            # Handle Source URLs
+            sources = row.get('Source URLs', '')
+            if sources and sources != "Not Available":
+                if isinstance(sources, list):
+                    formatted_sources = '<br>'.join([f'<a href="{url}" target="_blank">{url}</a>' for url in sources])
+                else:
+                    formatted_sources = '<br>'.join([f'<a href="{url.strip()}" target="_blank">{url.strip()}</a>' for url in re.split(r';|,', sources) if url.strip()])
+                st.markdown(f"**Sources for {person_name}:**<br>{formatted_sources}", unsafe_allow_html=True)
+            else:
+                st.info(f"No sources available for {person_name}.")
         
         st.markdown("---")
 
@@ -157,105 +136,6 @@ def summarize_paper(paper_title, paper_abstract):
         logger.error(f"Error summarizing paper '{paper_title}': {e}")
         return "Summary not available."
 
-def process_leads(leads, columns_to_retrieve):
-    processed_leads = []
-    leads_info_df = pd.DataFrame()
-    
-    total_leads = len(leads)
-    logger.info(f"Starting lead information scraping for {total_leads} leads.")
-    
-    for idx, (lead_name, lead_category) in enumerate(leads):
-        logger.info(f"Processing Lead {idx + 1} of {total_leads}: {lead_name}")
-        
-        # Scrape per-field information
-        field_data_list = []
-        for field in columns_to_retrieve:
-            if field in ["Company/Group Name", "Summary", "Category"]:
-                continue  # Skip fields that don't require scraping
-            field_data = scrape_information_field(lead_name, field, num_search_results=3)  # Increased num_search_results to 3
-            field_data_list.append(field_data)
-            time.sleep(random.uniform(1, 2))  # Reduced sleep time to speed up processing
-        
-        # Extract lead information using GPT with chunking
-        lead_info = extract_lead_info_with_llm_per_field(lead_name, lead_category, field_data_list)
-        
-        if lead_info:
-
-            detailed_grants = []
-            if "Grants" in lead_info and isinstance(lead_info["Grants"], list):
-                for grant in lead_info["Grants"]:
-                    if isinstance(grant, dict):
-                        detailed_grants.append({
-                            "Name": grant.get("Name", "Not Available"),
-                            "Amount": grant.get("Amount", "Not Available"),
-                            "Period": grant.get("Period", "Not Available"),
-                            "Start Date": grant.get("Start Date", "Not Available"),
-                        })
-            lead_info["Grants"] = detailed_grants
-
-            # Ensure all list fields are lists
-            list_fields = ["Researchers", "Grants", "Contacts"]
-            for list_field in list_fields:
-                if list_field in lead_info and isinstance(lead_info[list_field], str):
-                    lead_info[list_field] = [lead_info[list_field]]
-                elif list_field not in lead_info:
-                    lead_info[list_field] = []
-                    
-            # Ensure Phone Number and Email are dictionaries
-            dict_fields = ["Phone Number", "Email"]
-            for dict_field in dict_fields:
-                if dict_field in lead_info and not isinstance(lead_info[dict_field], dict):
-                    if dict_field == "Phone Number":
-                        lead_info[dict_field] = {"number": "Not Available", "purpose": "Not Available"}
-                    else:
-                        lead_info[dict_field] = {"address": "Not Available", "purpose": "Not Available"}
-                elif dict_field not in lead_info:
-                    if dict_field == "Phone Number":
-                        lead_info[dict_field] = {"number": "Not Available", "purpose": "Not Available"}
-                    else:
-                        lead_info[dict_field] = {"address": "Not Available", "purpose": "Not Available"}
-            
-            # Ensure other fields are present
-            required_fields = ["Company/Group Name", "Category", "Summary", "Country", "University", "CEO/PI"]
-            for field in required_fields:
-                if field not in lead_info:
-                    lead_info[field] = "Not Available"
-            
-            # **Ensure 'University' is a string**
-            if "University" in lead_info:
-                if isinstance(lead_info["University"], list):
-                    lead_info["University"] = ", ".join(lead_info["University"])
-                elif isinstance(lead_info["University"], str):
-                    lead_info["University"] = lead_info["University"].strip()
-                else:
-                    lead_info["University"] = "Not Available"
-            else:
-                lead_info["University"] = "Not Available"
-            
-            # Concatenate Source URLs as a single string
-            if "Source URLs" in lead_info:
-                if isinstance(lead_info["Source URLs"], list):
-                    lead_info["Source URLs"] = "; ".join(lead_info["Source URLs"])
-                elif isinstance(lead_info["Source URLs"], str):
-                    lead_info["Source URLs"] = lead_info["Source URLs"].strip()
-                else:
-                    lead_info["Source URLs"] = "Not Available"
-            else:
-                lead_info["Source URLs"] = "Not Available"
-            
-            # Append to DataFrame
-            leads_info_df = pd.concat(
-                [leads_info_df, pd.DataFrame([lead_info])],
-                ignore_index=True
-            )
-            processed_leads.append(lead_info)
-            logger.info(f"Processed lead: {lead_name}")
-        else:
-            logger.warning(f"No lead_info extracted for {lead_name}. Skipping.")
-    
-    logger.info("Lead information scraping completed.")
-    return leads_info_df, processed_leads
-
 def clean_text(text):
     """
     Cleans and normalizes text data.
@@ -275,22 +155,45 @@ def count_tokens(text):
 def extract_persons(leads_info_df):
     """
     Extracts unique person names associated with leads from the scraped data.
+    Processes both 'Contacts' and 'Researchers' fields.
     """
     persons = []
     for _, row in leads_info_df.iterrows():
+        lead_entity = row.get('Entity', 'Unknown')
+        
+        # Process Contacts
         contacts = row.get('Contacts', [])
         if isinstance(contacts, str):
             try:
                 contacts = json.loads(contacts)
             except json.JSONDecodeError:
-                logger.warning(f"Failed to decode Contacts for lead: {row.get('Company/Group Name', '')}")
-                continue
+                logger.warning(f"Failed to decode Contacts for lead: {lead_entity}")
+                contacts = []
         for contact in contacts:
             name = contact.get('Name')
             if name and name.strip().lower() != 'not available':
-                persons.append((name.strip(), row.get('Company/Group Name', 'Unknown')))
+                persons.append((name.strip(), lead_entity))
+        
+        # Process Researchers
+        researchers = row.get('Researchers', [])
+        if isinstance(researchers, str):
+            try:
+                researchers = json.loads(researchers)
+            except json.JSONDecodeError:
+                logger.warning(f"Failed to decode Researchers for lead: {lead_entity}")
+                researchers = []
+        for researcher in researchers:
+            if isinstance(researcher, dict):
+                name = researcher.get('name') or researcher.get('Name')
+            else:
+                name = researcher
+            if name and name.strip().lower() != 'not available':
+                persons.append((name.strip(), lead_entity))
+    
+    # Remove duplicates
     unique_persons = list(set(persons))
     return unique_persons
+
 
 def download_leads(leads_df, excel_filename):
     """
@@ -381,7 +284,7 @@ def scrape_landing_page(url):
         logger.error(f"Error parsing HTML for {url}: {parse_error}")
         return ""
 
-def perform_google_search(query, num_results=7, additional_keywords=None):
+def perform_google_search(query, num_results=3, additional_keywords=None):
     """
     Performs a Google search using Serper API and returns a list of URLs.
 
@@ -571,7 +474,7 @@ def extract_lead_info_with_llm_per_field(lead_name, lead_category, field_data_li
     """
     # Initialize the lead_info dictionary
     lead_info = {
-        "Company/Group Name": lead_name,
+        "Entity": lead_name,
         "CEO/PI": "Not Available",
         "Researchers": [],
         "Grants": [],
@@ -589,7 +492,7 @@ def extract_lead_info_with_llm_per_field(lead_name, lead_category, field_data_li
     prompt_template = f"""
 You are an AI assistant specialized in extracting business information. Based on the provided scraped data, extract the following details about the company in JSON format only. Do not include any additional text, explanations, or markdown.
 
-**Lead Name:** {lead_name}
+**Lead Entity:** {lead_name}
 **Lead Category:** {lead_category}
 
 **Fields to Extract:**
@@ -610,7 +513,7 @@ You are an AI assistant specialized in extracting business information. Based on
 
 **Output Structure:**
 {{
-    "Company/Group Name": "Genentech",
+    "Entity": "Genentech",
     "Category": "Biotechnology Company",
     "CEO/PI": "Ashley Magargee",
     "Researchers": [
@@ -677,7 +580,7 @@ You are an AI assistant specialized in extracting business information. Based on
         try:
             partial_info = json.loads(response)  # Expecting JSON format
             for key, value in partial_info.items():
-                if key in ["Company/Group Name", "Category"]:
+                if key in ["Entity", "Type"]:
                     continue  # Already set
                 elif key in ["CEO/PI", "Country", "University", "Summary"]:
                     if lead_info[key] == "Not Available":
@@ -710,7 +613,7 @@ You are an AI assistant specialized in extracting business information. Based on
     lead_info["Source URLs"] = lead_info["Source URLs"].rstrip("; ")
 
     # Ensure all required fields are present
-    required_fields = ["Company/Group Name", "CEO/PI", "Researchers", "Grants",
+    required_fields = ["Entity", "CEO/PI", "Researchers", "Grants",
                        "Phone Number", "Email", "Country", "University",
                        "Summary", "Contacts", "Category", "Source URLs"]
     for field in required_fields:
@@ -723,67 +626,75 @@ def extract_person_info_with_llm(text, person_name, source_urls):
     """
     Sends scraped person information to llm for detailed extraction.
     """
-
     prompt = f"""
-You are an AI assistant specialized in extracting detailed person profiles from text. Extract the following information about the person and provide it in the specified JSON format only. Do not include any additional text, explanations, or markdown.
-
-**Person Name:** {person_name}
-
-**Text:**
-{text}
-
-**Fields to Extract:**
-- "Name"
-- "Education"
-- "Current Position"
-- "Expertise"
-- "Email"
-- "Phone Number"
-- "Faculty"
-- "University"
-- "Bio"
-- "Academic/Work Website Profile Link"
-- "LinkedIn/Profile Link"
-- "Facebook/Profile Link"
-- "Grant"
-
-**Instructions:**
-- Populate each field with the most relevant information extracted from the text.
-- If a field's information is not available, set it to "Not Available".
-- Ensure the JSON is valid, properly formatted, and includes all specified fields.
-
-**Output:**
-[{
-    "Name": "...",
-    "Education": "...",
-    "Current Position": "...",
-    "Expertise": "...",
-    "Email": "...",
-    "Phone Number": "...",
-    "Faculty": "...",
-    "University": "...",
-    "Bio": "...",
-    "Academic/Work Website Profile Link": "...",
-    "LinkedIn/Profile Link": "...",
-    "Facebook/Profile Link": "...",
-    "Grant": "..."
-}]
-"""
-
+    You are an AI assistant specialized in extracting detailed person profiles from text. Extract the following information about the person and provide it in the specified JSON format only. Do not include any additional text, explanations, or markdown.
+    
+    **Person Name:** {person_name}
+    
+    **Text:**
+    {text}
+    
+    **Fields to Extract:**
+    - "Name"
+    - "Education"
+    - "Current Position"
+    - "Expertise"
+    - "Email"
+    - "Phone Number"
+    - "Faculty"
+    - "University"
+    - "Bio"
+    - "Academic/Work Website Profile Link"
+    - "LinkedIn/Profile Link"
+    - "Facebook/Profile Link"
+    - "Grant"
+    
+    **Instructions:**
+    - Populate each field with the most relevant information extracted from the text.
+    - If a field's information is not available, set it to "Not Available".
+    - Ensure the JSON is valid, properly formatted, and includes all specified fields.
+    
+    **Output:**
+    {{
+        "Name": "...",
+        "Education": "...",
+        "Current Position": "...",
+        "Expertise": "...",
+        "Email": "...",
+        "Phone Number": "...",
+        "Faculty": "...",
+        "University": "...",
+        "Bio": "...",
+        "Academic/Work Website Profile Link": "...",
+        "LinkedIn/Profile Link": "...",
+        "Facebook/Profile Link": "...",
+        "Grant": "..."
+    }}
+    """
+    sources = []
     try:
-       
         person_info_text = llm_reasoning(prompt)
 
         logger.info(f"Raw llm Response for Person Information Extraction ('{person_name}'):")
         logger.info(person_info_text)
 
+        # Parse the JSON response
         person_info = json.loads(person_info_text)
-        person_info['Source URLs'] = source_urls
+        
+        # Split the source_urls string into a list if it's a string
+        if isinstance(source_urls, str):
+            sources = [url.strip() for url in re.split(r';|,', source_urls) if url.strip()]
+        elif isinstance(source_urls, list):
+            sources = source_urls
+        else:
+            sources = []
+        
+        person_info['Source URLs'] = sources
     except json.JSONDecodeError:
         logger.error("Failed to parse the response from llm while extracting person info.")
         logger.debug(f"Received Response: {person_info_text}")
         person_info = {
-            "Name": person_name,
+            "Name": person_name,  # Correctly set to person_name
             "Education": "Not Available",
             "Current Position": "Not Available",
             "Expertise": "Not Available",
@@ -792,16 +703,16 @@ You are an AI assistant specialized in extracting detailed person profiles from 
             "Faculty": "Not Available",
             "University": "Not Available",
             "Bio": "Not Available",
-            "Academic/work website Profile Link": "Not Available",
+            "Academic/Work Website Profile Link": "Not Available",
             "LinkedIn/Profile Link": "Not Available",
             "Facebook/Profile Link": "Not Available",
             "Grant": "Not Available",
-            "Source URLs": source_urls
+            "Source URLs": sources
         }
     except Exception as e:
         logger.error(f"An error occurred while extracting person info for '{person_name}': {e}")
         person_info = {
-            "Name": person_name,
+            "Name": person_name,  # Correctly set to person_name
             "Education": "Not Available",
             "Current Position": "Not Available",
             "Expertise": "Not Available",
@@ -810,23 +721,27 @@ You are an AI assistant specialized in extracting detailed person profiles from 
             "Faculty": "Not Available",
             "University": "Not Available",
             "Bio": "Not Available",
-            "Academic/work website Profile Link": "Not Available",
+            "Academic/Work Website Profile Link": "Not Available",
             "LinkedIn/Profile Link": "Not Available",
             "Facebook/Profile Link": "Not Available",
             "Grant": "Not Available",
-            "Source URLs": source_urls
+            "Source URLs": sources
         }
 
     # Ensure all required fields are present
-    required_fields = ["Name", "Education", "Current Position", "Expertise", "Email",
-                       "Phone Number", "Faculty", "University", "Bio",
-                       "Academic/work website Profile Link", "LinkedIn/Profile Link",
-                       "Facebook/Profile Link", "Grant", "Source URLs", "Company/Group Name"]
+    required_fields = [
+        "Name", "Education", "Current Position", "Expertise", "Email",
+        "Phone Number", "Faculty", "University", "Bio",
+        "Academic/Work Website Profile Link", "LinkedIn/Profile Link",
+        "Facebook/Profile Link", "Grant", "Source URLs"
+    ]
+
     for field in required_fields:
         if field not in person_info:
             person_info[field] = "Not Available"
 
     return person_info
+
 
 def generate_leads_with_llm(context, num_leads, lead_types):
     """
@@ -839,28 +754,35 @@ You are an AI assistant tasked with generating a list of {num_leads} unique and 
 
 {context}
 
-Please provide the names along with their type in a JSON array. Ensure that the names are real-world {lead_type.lower()}s and avoid generic terms or scientific concepts. Each {lead_type.lower()} should be distinct and plausible.
+Please provide the names, the affiliated University, Country, and City, along with their type in a JSON array. Ensure that the examples exist in the real-world {lead_type.lower()}s. Each {lead_type.lower()} should be distinct and real.
 
 Output:
 [
-    {{"name": "Name 1", "type": "{lead_type}"}},
-    {{"name": "Name 2", "type": "{lead_type}"}},
+    {{"entity": "Entity Name 1", "university": "University name 1", "city": "city name 1", "country": "country name 1", "type": "{lead_type}"}},
+    {{"entity": "Entity Name 2", "university": "University name 2", "city": "city name 2", "country": "country name 2", "type": "{lead_type}"}},
     ...
 ]
 """
         try:
-            
             names_text = llm_reasoning(prompt)
 
             logger.info(f"Raw llm Response for Lead Generation ({lead_type}):")
             logger.info(names_text)
 
             lead_names = json.loads(names_text)
-            leads.extend([(lead['name'], lead['type']) for lead in lead_names[:num_leads]])
+            for lead in lead_names[:num_leads]:
+                leads.append({
+                    "Entity": lead.get("entity", "Not Available"),
+                    "Type": lead.get("type", "Not Available"),
+                    "University": lead.get("university", "Not Available"),
+                    "City": lead.get("city", "Not Available"),
+                    "Country": lead.get("country", "Not Available")
+                })
         except json.JSONDecodeError:
             logger.error(f"Failed to parse the response from llm for {lead_type}. Please try again.")
         except Exception as e:
             logger.error(f"An error occurred while generating leads for {lead_type}: {e}")
+
 
     return leads
 

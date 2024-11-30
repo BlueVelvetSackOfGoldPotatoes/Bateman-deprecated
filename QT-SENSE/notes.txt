@@ -8,7 +8,7 @@ Also I want to be able to add new publisher links - make sure this is possible, 
 run: streamlit run app_standalone.py
 
 qt-sense:
-Search only in Europe. The relevant clients to find should be those that can give use to the following technology. Do not give me companies that already have this type of technology. Just like if I was selling microscopes, I would not want microscopy companies. The following is a description of the technology:
+The relevant clients to find should be those that can give use to the following technology. Do not give me companies that already have this type of technology. Just like if I was selling microscopes, I would not want microscopy companies. The following is a description of the technology:
 =======
 Nitrogen vacancy (NV) centers are nitrogen atoms and an adjacent vacancy, which replace carbon atoms in diamonds. Diamonds with such defects are called fluorescent nanodiamonds (FNDs). The NV centers can be exploited to perform quantum measurements. The fluorescence from excited NV centers can be measured to detect surrounding magnetic field resonances (magnetic noise) with high sensitivity and spatial resolution. 
 
@@ -67,3 +67,44 @@ What other issues are you facing? What’s your priority on resolving the issues
 When are you looking to solve your problem?
 Are you considering any other solutions or services?
 ============
+
+================================
+open conference program -> different titles, different themes, different presentation title, different abstracts (maybe)
+
+If the title of the talk is appealing maybe this is already useful.
+
+We are these people, what university, email ids, entire group email ids. Put it all in an excel sheet - a failure point is that we do a selection too early.
+
+Then this stuff goes into the CRM software - if we interact back and forth then we can jump to personal email, then it becomes a lead. Can they come and have a meeting with them - online / before the conference / after the conference: What information can we get from them in terms of the BANT.
+
+BANT must be done from the scope of the person. It's not just about seeing what grant they have, but also how much of the grant is still live.
+
+Scrape the information about grants and know about the years for that grant - we can even build a ledger.
+
+As the university bought an instrument? Look at the university tenders.
+
+Tenders - at the company/university level and Grants at the personal level are super important.
+
+Bootstrap - get client inflow quickly.
+
+3/4 first companies yearly basis
+1 conference a month limit - Subscription
+5 euro per contact per conference. A, B, and C rating listed by the ensights model.
+
+20% stake, 80% us - 40% & 40%.
+Open a holding company with Lisa.
+
+Get the MVP ready for testing. Make sure DUCOM / QT-Sense use it.
+
+Revenue generation per contact basis.
+
+ShopnLab can also buy the subscription.
+
+2nd week of December meet with Timen and Deepak.
+
+14th December.
+
+=================================
+todo: 
+1. Save links associated to the company and the ones associated with each individual, separately.
+2. Need to be sure that the people being scraped make sense - several people with the same name are also being scraped from linkdin... Try to just scrape from educational institutions?

@@ -27,38 +27,49 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-def generate_bant_report(ranked_leads_df):
+def generate_bant_report(person_leads_df, company_bant_df):
     """
-    Generates a BANT report for all leads, including graphs and llm analysis.
-
-    :param ranked_leads_df: DataFrame containing ranked leads with BANT scores.
-    :return: BytesIO object containing the report (e.g., PDF or Excel).
+    Generates a comprehensive BANT report including individual and company-level analyses.
+    
+    :param person_leads_df: DataFrame containing individual-level BANT scores.
+    :param company_bant_df: DataFrame containing company-level aggregated BANT scores.
+    :return: BytesIO object containing the report (Excel format).
     """
     try:
-        # For simplicity, we'll generate an Excel report with multiple sheets
+        # Initialize the Excel writer
         report_buffer = BytesIO()
         with pd.ExcelWriter(report_buffer, engine='openpyxl') as writer:
-            # Sheet 1: Ranked Leads with BANT Scores
-            ranked_leads_df.to_excel(writer, sheet_name='Ranked Leads BANT', index=False)
+            # Sheet 1: Individual BANT Scores
+            person_leads_df.to_excel(writer, sheet_name='Individual BANT', index=False)
             
-            # Sheet 2: Summary Statistics
-            summary = ranked_leads_df.describe()
-            summary.to_excel(writer, sheet_name='Summary Statistics')
+            # Sheet 2: Company-Level BANT Scores
+            company_bant_df.to_excel(writer, sheet_name='Company BANT', index=False)
             
-            # Sheet 3: Recommendations
-            recommendations = ranked_leads_df[['Company/Group Name', 'Recommendations']]
-            recommendations.to_excel(writer, sheet_name='Recommendations', index=False)
+            # Sheet 3: Summary Statistics for Individuals
+            individual_summary = person_leads_df.describe()
+            individual_summary.to_excel(writer, sheet_name='Individual Summary')
             
-            # Sheet 4: Graphs
-            workbook = writer.book
-            worksheet = workbook.create_sheet("Graphs")
+            # Sheet 4: Summary Statistics for Companies
+            company_summary = company_bant_df.describe()
+            company_summary.to_excel(writer, sheet_name='Company Summary')
             
-            # Example Graph: Distribution of Overall BANT Scores
+            # Sheet 5: Recommendations for Individuals
+            individual_recommendations = person_leads_df[['Name', 'Name', 'Recommendations']]
+            individual_recommendations.to_excel(writer, sheet_name='Individual Recommendations', index=False)
+            
+            # Sheet 6: Recommendations for Companies
+            company_recommendations = company_bant_df[['Entitys', 'Recommendations']]
+            company_recommendations.to_excel(writer, sheet_name='Company Recommendations', index=False)
+            
+            # Sheet 7: Graphs
+            worksheet = writer.book.create_sheet("Graphs")
+            
+            # Graph 1: Distribution of Overall BANT Scores (Individuals)
             plt.figure(figsize=(10, 6))
-            plt.hist(ranked_leads_df['Overall BANT Score'], bins=10, color='salmon', edgecolor='black')
-            plt.title('Distribution of Overall BANT Scores')
+            plt.hist(person_leads_df['Overall BANT Score'], bins=10, color='skyblue', edgecolor='black')
+            plt.title('Distribution of Individual Overall BANT Scores')
             plt.xlabel('Overall BANT Score')
-            plt.ylabel('Number of Leads')
+            plt.ylabel('Number of Individuals')
             plt.tight_layout()
             graph_buffer = BytesIO()
             plt.savefig(graph_buffer, format='png')
@@ -67,15 +78,12 @@ def generate_bant_report(ranked_leads_df):
             img = openpyxl.drawing.image.Image(graph_buffer)
             worksheet.add_image(img, 'A1')
             
-            # Additional Graph: BANT Component Scores per Company
-            plt.figure(figsize=(12, 8))
-            bant_components = ['Budget Score', 'Authority Score', 'Need Score', 'Timeline Score']
-            for component in bant_components:
-                plt.hist(ranked_leads_df[component], bins=10, alpha=0.5, label=component)
-            plt.title('Distribution of BANT Components Scores')
-            plt.xlabel('Score')
-            plt.ylabel('Number of Leads')
-            plt.legend()
+            # Graph 2: Distribution of Overall BANT Scores (Companies)
+            plt.figure(figsize=(10, 6))
+            plt.hist(company_bant_df['Overall BANT Score'], bins=10, color='salmon', edgecolor='black')
+            plt.title('Distribution of Company Overall BANT Scores')
+            plt.xlabel('Overall BANT Score')
+            plt.ylabel('Number of Companies')
             plt.tight_layout()
             graph_buffer2 = BytesIO()
             plt.savefig(graph_buffer2, format='png')
@@ -83,6 +91,23 @@ def generate_bant_report(ranked_leads_df):
             graph_buffer2.seek(0)
             img2 = openpyxl.drawing.image.Image(graph_buffer2)
             worksheet.add_image(img2, 'A20')
+            
+            # Graph 3: Average BANT Components per Company
+            plt.figure(figsize=(12, 8))
+            bant_components = ['Average Budget Score', 'Average Authority Score', 'Average Need Score', 'Average Timeline Score']
+            for component in bant_components:
+                plt.hist(company_bant_df[component], bins=10, alpha=0.5, label=component)
+            plt.title('Distribution of Average BANT Components Scores (Companies)')
+            plt.xlabel('Score')
+            plt.ylabel('Number of Companies')
+            plt.legend()
+            plt.tight_layout()
+            graph_buffer3 = BytesIO()
+            plt.savefig(graph_buffer3, format='png')
+            plt.close()
+            graph_buffer3.seek(0)
+            img3 = openpyxl.drawing.image.Image(graph_buffer3)
+            worksheet.add_image(img3, 'A40')
         
         report_buffer.seek(0)
         return report_buffer
@@ -106,25 +131,39 @@ def summarize_paper(paper_title, paper_abstract):
 
 def perform_bant_analysis(lead_info, context):
     """
-    Performs BANT analysis on a single lead using llm-4.
+    Performs BANT analysis on a single lead using llm.
 
     :param lead_info: Dictionary containing lead information.
     :param context: The context provided by the user.
     :return: Dictionary containing BANT analysis.
     """
-    encoding = 'cl100k_base'
+    # Ensure `lead_info` keys have valid default values
+    sanitized_lead_info = {}
+    for key, value in lead_info.items():
+        if isinstance(value, (int, float)):
+            sanitized_lead_info[key] = value
+        elif isinstance(value, str):
+            sanitized_lead_info[key] = value.strip()  # Remove excess whitespace
+        elif value is None or value == '':
+            sanitized_lead_info[key] = "Not Available"  # Default for missing data
+        else:
+            sanitized_lead_info[key] = str(value)  # Convert other types to strings
 
-    # Use the context provided
-    context_text = context.strip() if context.strip() else "No specific context provided."
+    # Convert the sanitized dictionary to a JSON string
+    sanitized_lead_info_json = json.dumps(sanitized_lead_info, indent=4)
 
+    # Use the provided context or a fallback if none is provided
+    context_text = context.strip() if context and context.strip() else "No specific context provided."
+
+    # Construct the BANT prompt
     bant_prompt = f"""
 You are an AI assistant specialized in sales lead qualification using the BANT framework.
 
 **Context:**
-{context}
+{context_text}
 
 **Lead Information:**
-{json.dumps(lead_info, indent=4)}
+{sanitized_lead_info_json}
 
 **Task:**
 Analyze the lead information based on the BANT criteria (Budget, Authority, Need, Timeline). Provide the analysis in JSON format only, adhering strictly to the following structure without any additional text or explanations.
@@ -138,14 +177,14 @@ Analyze the lead information based on the BANT criteria (Budget, Authority, Need
 - **Recommendations:** Based on the scores, recommend whether to pursue or deprioritize the lead.
 
 **Output Example:**
-[{
+{{
     "Budget": {{"score": 0.8, "details": "Adequate budget available for our services."}},
     "Authority": {{"score": 0.7, "details": "Decision-maker identified within the organization."}},
     "Need": {{"score": 0.9, "details": "Clear need for our product based on current challenges."}},
     "Timeline": {{"score": 0.6, "details": "Interested in implementing within the next 6 months."}},
     "Overall BANT Score": 0.75,
     "Recommendations": "Pursue the lead with priority."
-}]
+}}
 
 **Please ensure:**
 - The JSON is valid and properly formatted.
@@ -153,8 +192,8 @@ Analyze the lead information based on the BANT criteria (Budget, Authority, Need
 - No additional commentary, explanations, or markdown is present.
 """
 
-
     try:
+        # Send the prompt to LLM and parse the response
         bant_analysis_text = llm_reasoning(bant_prompt)
         bant_analysis = json.loads(bant_analysis_text)
         return bant_analysis
@@ -180,21 +219,25 @@ Analyze the lead information based on the BANT criteria (Budget, Authority, Need
             "Recommendations": "Error occurred"
         }
 
-def rank_leads_with_bant(leads_info_df, context):
+def rank_leads_with_bant(leads_info_df, person_leads_df, context):
     """
-    Ranks leads based on BANT analysis.
-
-    :param leads_info_df: DataFrame containing lead information.
-    :param context: The initial context provided by the user.
-    :return: DataFrame with BANT scores and rankings.
+    Performs BANT analysis at the individual level and aggregates scores at the company level.
+    
+    :param leads_info_df: DataFrame containing company-level lead information.
+    :param person_leads_df: DataFrame containing individual-level lead information.
+    :param context: The context provided by the user.
+    :return: Tuple containing updated person_leads_df and company_bant_df.
     """
-    bant_scores = []
-    overall_scores = []
-    recommendations = []
-
-    for idx, row in leads_info_df.iterrows():
-        lead_info = row.to_dict()
-        bant_analysis = perform_bant_analysis(lead_info, context)
+    # Initialize lists to store aggregated company scores
+    company_scores = {}
+    
+    # Iterate over each person in person_leads_df
+    for idx, row in person_leads_df.iterrows():
+        person_info = row.to_dict()
+        company_name = person_info.get("Entity", "Unknown")
+        
+        # Perform BANT analysis for the individual
+        bant_analysis = perform_bant_analysis(person_info, context)
         
         # Extract individual BANT scores
         budget_score = bant_analysis.get("Budget", {}).get("score", 0)
@@ -204,22 +247,60 @@ def rank_leads_with_bant(leads_info_df, context):
         overall_score = bant_analysis.get("Overall BANT Score", 0)
         recommendation = bant_analysis.get("Recommendations", "Not Available")
         
-        bant_scores.append({
-            "Budget Score": budget_score,
-            "Authority Score": authority_score,
-            "Need Score": need_score,
-            "Timeline Score": timeline_score
+        # Append individual BANT scores to person_leads_df
+        person_leads_df.at[idx, "Budget Score"] = budget_score
+        person_leads_df.at[idx, "Authority Score"] = authority_score
+        person_leads_df.at[idx, "Need Score"] = need_score
+        person_leads_df.at[idx, "Timeline Score"] = timeline_score
+        person_leads_df.at[idx, "Overall BANT Score"] = overall_score
+        person_leads_df.at[idx, "Recommendations"] = recommendation
+        
+        # Aggregate scores per company
+        if company_name not in company_scores:
+            company_scores[company_name] = {
+                "Budget Score": [],
+                "Authority Score": [],
+                "Need Score": [],
+                "Timeline Score": [],
+                "Overall BANT Score": []
+            }
+        
+        company_scores[company_name]["Budget Score"].append(budget_score)
+        company_scores[company_name]["Authority Score"].append(authority_score)
+        company_scores[company_name]["Need Score"].append(need_score)
+        company_scores[company_name]["Timeline Score"].append(timeline_score)
+        company_scores[company_name]["Overall BANT Score"].append(overall_score)
+    
+    # Create company_bant_df by aggregating individual scores
+    company_bant_data = []
+    for company, scores in company_scores.items():
+        avg_budget = sum(scores["Budget Score"]) / len(scores["Budget Score"])
+        avg_authority = sum(scores["Authority Score"]) / len(scores["Authority Score"])
+        avg_need = sum(scores["Need Score"]) / len(scores["Need Score"])
+        avg_timeline = sum(scores["Timeline Score"]) / len(scores["Timeline Score"])
+        avg_overall = sum(scores["Overall BANT Score"]) / len(scores["Overall BANT Score"])
+        
+        # Determine company-level recommendation based on average scores
+        if avg_overall >= 0.75:
+            company_recommendation = "Pursue the company with high priority."
+        elif 0.5 <= avg_overall < 0.75:
+            company_recommendation = "Monitor the company and pursue if opportunities arise."
+        else:
+            company_recommendation = "Deprioritize the company."
+        
+        company_bant_data.append({
+            "Entity": company,
+            "Average Budget Score": round(avg_budget, 2),
+            "Average Authority Score": round(avg_authority, 2),
+            "Average Need Score": round(avg_need, 2),
+            "Average Timeline Score": round(avg_timeline, 2),
+            "Overall BANT Score": round(avg_overall, 2),
+            "Recommendations": company_recommendation
         })
-        overall_scores.append(overall_score)
-        recommendations.append(recommendation)
     
-    # Create a DataFrame from BANT scores
-    bant_df = pd.DataFrame(bant_scores)
-    leads_info_df = leads_info_df.reset_index(drop=True).join(bant_df)
-    leads_info_df["Overall BANT Score"] = overall_scores
-    leads_info_df["Recommendations"] = recommendations
+    company_bant_df = pd.DataFrame(company_bant_data)
     
-    # Rank leads based on Overall BANT Score
-    leads_info_df = leads_info_df.sort_values(by="Overall BANT Score", ascending=False).reset_index(drop=True)
+    # Rank companies based on Overall BANT Score
+    company_bant_df = company_bant_df.sort_values(by="Overall BANT Score", ascending=False).reset_index(drop=True)
     
-    return leads_info_df
+    return person_leads_df, company_bant_df
