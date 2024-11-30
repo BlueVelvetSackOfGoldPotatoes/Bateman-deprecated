@@ -1,0 +1,39 @@
+qt-sense:
+The relevant clients to find should be those that can give use to the following technology. Do not give me companies that already have this type of technology. Just like if I was selling microscopes, I would not want microscopy companies. The following is a description of the technology:
+=======
+Nitrogen vacancy (NV) centers are nitrogen atoms and an adjacent vacancy, which replace carbon atoms in diamonds. Diamonds with such defects are called fluorescent nanodiamonds (FNDs). The NV centers can be exploited to perform quantum measurements. The fluorescence from excited NV centers can be measured to detect surrounding magnetic field resonances (magnetic noise) with high sensitivity and spatial resolution. 
+
+How can diamond magnetometry be applied in healthcare and diagnostics?
+Diamond magnetometry can be used to monitor drug efficacy. Furthermore, Diamond magnetometry can provide insights into oxidative stress, which can damage cells and proteins and cause aging of the cells. Hence, research can be done on the role of oxidative stress in diseases, which is already assumed to play a role in diabetes, cancer, and neurodegenerative diseases. The technique can also contribute to the development of new, non-invasive imaging for diagnosing and monitoring various conditions. 
+
+How does quantum sensing with diamond magnetometry work?
+Functionalized nanodiamonds are carefully introduced into cells. The NV centers interact with the magnetic field inside the sample. To perform a measurement, the NV center is pumped into an excited state using a green laser and the time that it takes to return to the ground state is recorded by detecting the photons released by fluorescence. This relaxation time is directly influenced by the magnetic noise in the system, which is a measurement of the concentration of free radicals in the cell. This technique is called T1 Relaxometry. 
+
+What are the parameters controlled and measured by Quantum Nuova?
+Controlled parameters: Laser power, Detection window (detection filter), Laser pulse duration, Detection window duration, Minimum, maximum and number of the dark times, Repetition number
+
+Measured parameters: Time gated photon counting
+You can adjust the sensitivity of the detected signals by customizing the detectors and filter sets for the ultra high signal to noise ratio options. The choice of objective lens allows for the use of different sample types.
+
+What are the advantages of using diamond-based magnetometry?
+This approach is valuable because it allows for localized, non-invasive measurements of free radicals within living cells without the need for external markers or dyes, which can affect cell viability or introduce measurement biases. T1 relaxometry's ability to detect free radicals down to nanomolar concentrations and its application across various biological contexts (e.g., drug delivery, research) underscores its potential to advance our understanding of cellular dynamics and disease mechanisms.
+
+How to achieve a non-invasive measurement?
+One of the key advantages of using fluorescent nanodiamonds (FNDs) is their biocompatibility, allowing them to be introduced into living organisms or cells without causing harm. Moreover, FNDs can be functionalized with specific biomolecules, enabling targeted delivery to distinct types of cells or biological structures. This specificity ensures that measurements are localized and relevant to the area of interest, such as cancerous tissues or sites of infection, enhancing precision . Finally, detection is also non-invasive as the nanodiamonds are probed with precisely aligned lasers and the fluorescence emitted by the nanodiamonds is detected through photon detectors. 
+
+What types of magnetic fields can diamond magnetometry detect?
+Using quantum sensing in the form of diamond magnetometry allows you to take measurements of extremely sensitive nanoscale magnetic noise, otherwise near impossible to detect. Analogously to T1 measurements in conventional magnetic resonance imaging (MRI), relaxometry allows the detection of different concentrations of paramagnetic species. In this way you can recreate an MRI with subcellular resolution. 
+
+What distinguishes sensitivity from specificity in measurements?
+Sensitivity refers to the method's ability to accurately detect the presence of free radicals, even at low concentrations. Specificity refers to the ability of the instrument to distinguish between different sources of variation, in essence describing the varying sources of the free radical generations within the cell.
+
+What is the use of the confocal microscope in Quantum Nuova?
+The confocal microscope is primarily used to localize the functionalized nanodiamonds that have been injected into the cell for quantum sensing. Once the location is known, the nanodiamonds can be pumped into an excited state by the laser to be used for quantum sensing. It can also be used to image the cells.  
+
+What kind of samples can I use?
+T1 Relaxometry to study oxadative stress can be applied to live samples which makes the microscope is highly suitable for biomedical applications. Current studied samples include aqueous solutions of different chemicals, cell lines (eg. bacteria, yeast, sperm cells, cancer cells, epithelial cells), primary cells (eg. immune cells, lung cells), liver tissue and synovial fluid. 
+Can the device be used for both live and fixed samples?
+
+The Quantum Nuova can be used for both live and fixed samples. To measure stress responses, diamond magnetometry can only be used on live samples. You can use the technique on fixed samples to measure other properties, such as the concentration of gadolinium in a solution. Check out the applications for further information.
+Are there any safety considerations or precautions when working with Quantum Nuova?
+The Quantum Nuova is fully enclosed so  the user has no interaction with the laser light, inner electronics, or alignment. Furthermore, a cell incubator can be attached for samples requiring specific conditions. The instrument is safe to use in an environment adhering to standard laboratory rules.
