@@ -5,8 +5,6 @@ import re
 import subprocess
 import os
 import requests
-import random
-import time
 from bs4 import BeautifulSoup
 import tiktoken
 from io import BytesIO
@@ -130,7 +128,7 @@ def summarize_paper(paper_title, paper_abstract):
     try:
         prompt = f"Provide a summary for the following paper. Together with a summary of the overall paper, be sure to inlude the methods used, what was the experiment, what technologies were used, what was the result, and what were the hypotheses as well as the relevant field. \n\nTitle: {paper_title}\n\nAbstract: {paper_abstract}\n\nSummary:"
 
-        summary = llm_reasoning(prompt)
+        summary = llm_reasoning(prompt, "gpt-4o-mini")
         return summary
     except Exception as e:
         logger.error(f"Error summarizing paper '{paper_title}': {e}")
@@ -373,100 +371,13 @@ def clean_dataframe(df):
     
     return df
 
-def scrape_information_field(company_name, field, num_search_results=1):
-    """
-    Scrapes information for a specific field of a company by performing targeted Google searches.
 
-    :param company_name: Name of the company.
-    :param field: Information field to search for (e.g., "Email", "Phone Number").
-    :param num_search_results: Number of top Google search results to scrape.
-    :return: Dictionary containing aggregated text and source URLs for the field.
-    """
-    additional_keywords = []
-    field_lower = field.lower()
-    if field_lower == "email":
-        additional_keywords = ["email"] # , "support", "info", "email", "reach us", "get in touch"
-    elif field_lower == "phone number":
-        additional_keywords = ["contact"] # , "support", "customer service", "call us", "reach us"
-    elif field_lower == "researchers":
-        additional_keywords = ["scientists"] # , "staff", "employees", "faculty", "members"
-    elif field_lower == "grants":
-        additional_keywords = ["funding"] # , "projects", "awards", "grants", "sponsorships"
-    elif field_lower == "country":
-        additional_keywords = ["country"] # , "address", "headquarters", "base", "where we are"
-    elif field_lower == "university":
-        additional_keywords = ["affiliated university"] # , "institution", "academic affiliation", "campus"
-    elif field_lower == "contacts":
-        additional_keywords = ["team"] # , "staff", "members", "profiles", "contacts", "directory"
-    elif field_lower == "ceo/pi":
-        additional_keywords = ["director", "principal investigator", "head of department"] # "leadership", "executive team", 
-    elif field_lower == "address":
-        additional_keywords = ["headquarters"] # "location", "office address", "base", "where we are"
-    elif field_lower == "website":
-        additional_keywords = ["homepage"] # "official site", "corporate website", "about us"
-    elif field_lower == "social media":
-        additional_keywords = ["LinkedIn"] # , "Facebook", "Twitter", "Instagram", "social profiles"
-    elif field_lower == "services":
-        additional_keywords = ["what we do"] # , "offerings", "services", "solutions", "capabilities"
-    elif field_lower == "products":
-        additional_keywords = ["our products"] # , "product line", "offerings", "goods", "merchandise"
-    elif field_lower == "mission":
-        additional_keywords = ["about us"] # , "mission statement", "our mission", "purpose", "vision"
-    elif field_lower == "values":
-        additional_keywords = ["core values"] # , "our values", "principles", "beliefs"
-    # elif field_lower == "careers":
-    #     additional_keywords = ["jobs"] # , "employment", "career opportunities", "join us", "work with us"
-    else:
-        # Default keywords if field is unrecognized
-        additional_keywords = ["information", "details", "about", "overview"]
-
-
-    search_query = f"{company_name} {field}"
-    logger.info(f"Performing Google search for: '{search_query}' with keywords: {additional_keywords}")
-    urls = perform_google_search(search_query, num_results=num_search_results, additional_keywords=additional_keywords)
-
-    aggregated_text = ""
-    source_urls = []
-
-    for url in urls:
-        logger.info(f"Scraping URL for field '{field}': {url}")
-        text = scrape_landing_page(url)
-        if text:
-            aggregated_text += text + " "
-            source_urls.append(url)
-        else:
-            logger.warning(f"No text scraped from URL: {url}")
-
-    return {
-        "field": field,
-        "text": aggregated_text,
-        "source_urls": source_urls
-    }
-
-def process_chunk(prompt):
-    """
-    Sends a prompt chunk to OpenAI and retrieves the JSON response.
-
-    :param prompt: The prompt string to send to OpenAI.
-    :return: The JSON response as a string, or None if an error occurs.
-    """
-    try:
-        
-        lead_info_text = llm_reasoning(prompt)
-        logger.info(f"llm Response for Chunk:\n{lead_info_text}")
-        return lead_info_text
-    except Exception as e:
-        logger.error(f"Error processing chunk: {e}")
-        return None
-
-
-def extract_lead_info_with_llm_per_field(lead_name, lead_category, field_data_list, max_tokens=124000, overlap=100):
+def extract_lead_info_with_llm_per_field(lead_name, field_data_list, max_tokens=124000, overlap=100):
     """
     Extracts lead information using llm based on per-field scraped data.
     Splits the data into chunks if the prompt exceeds the token limit.
     
     :param lead_name: Name of the lead company.
-    :param lead_category: Category of the lead.
     :param field_data_list: List of dictionaries containing field, text, and source URLs.
     :param max_tokens: Maximum number of tokens per OpenAI request.
     :param overlap: Number of tokens to overlap between chunks.
@@ -484,7 +395,6 @@ def extract_lead_info_with_llm_per_field(lead_name, lead_category, field_data_li
         "University": "Not Available",
         "Summary": "Not Available",
         "Contacts": [],
-        "Category": lead_category,
         "Source URLs": ""
     }
 
@@ -493,10 +403,10 @@ def extract_lead_info_with_llm_per_field(lead_name, lead_category, field_data_li
 You are an AI assistant specialized in extracting business information. Based on the provided scraped data, extract the following details about the company in JSON format only. Do not include any additional text, explanations, or markdown.
 
 **Lead Entity:** {lead_name}
-**Lead Category:** {lead_category}
 
 **Fields to Extract:**
 - CEO/PI
+- Category
 - Researchers
 - Grants (with Name, Amount, Period, Start Date)
 - Phone Number
@@ -569,7 +479,8 @@ You are an AI assistant specialized in extracting business information. Based on
     responses = []
     for idx, chunk in enumerate(chunks):
         full_prompt = prompt_template + chunk + "\n\nPlease provide the extracted information in JSON format only. Ensure the JSON is valid and properly formatted. Do not include any markdown or additional text."
-        response = process_chunk(full_prompt)
+        lead_info_text = llm_reasoning(full_prompt, "gpt-4o-mini")
+        logger.info(f"llm Response for Chunk:\n{lead_info_text}")
         if response:
             responses.append(response)
         else:
@@ -673,7 +584,7 @@ def extract_person_info_with_llm(text, person_name, source_urls):
     """
     sources = []
     try:
-        person_info_text = llm_reasoning(prompt)
+        person_info_text = llm_reasoning(prompt, "gpt-4o-mini")
 
         logger.info(f"Raw llm Response for Person Information Extraction ('{person_name}'):")
         logger.info(person_info_text)
@@ -749,40 +660,25 @@ def generate_leads_with_llm(context, num_leads, lead_types):
     """
     leads = []
     for lead_type in lead_types:
-        prompt = f"""
-You are an AI assistant tasked with generating a list of {num_leads} unique and realistic {lead_type.lower()}s that are relevant to the following context:
-
-{context}
-
-Please provide the names, the affiliated University, Country, and City, along with their type in a JSON array. Ensure that the examples exist in the real-world {lead_type.lower()}s. Each {lead_type.lower()} should be distinct and real.
-
-Output:
-[
-    {{"entity": "Entity Name 1", "university": "University name 1", "city": "city name 1", "country": "country name 1", "type": "{lead_type}"}},
-    {{"entity": "Entity Name 2", "university": "University name 2", "city": "city name 2", "country": "country name 2", "type": "{lead_type}"}},
-    ...
-]
-"""
         try:
-            names_text = llm_reasoning(prompt)
+            prompt = f"""
+            Generate a list of {num_leads} unique {lead_type.lower()} leads based on the context:
+            {context}
 
-            logger.info(f"Raw llm Response for Lead Generation ({lead_type}):")
-            logger.info(names_text)
+            Output as a JSON array:
+            [
+                {{"entity": "Entity Name 1"}},
+                {{"entity": "Entity Name 2"}}
+            ]
+            """
+            response = llm_reasoning(prompt, "gpt-4o-mini")
+            generated_leads = json.loads(response)
 
-            lead_names = json.loads(names_text)
-            for lead in lead_names[:num_leads]:
-                leads.append({
-                    "Entity": lead.get("entity", "Not Available"),
-                    "Type": lead.get("type", "Not Available"),
-                    "University": lead.get("university", "Not Available"),
-                    "City": lead.get("city", "Not Available"),
-                    "Country": lead.get("country", "Not Available")
-                })
-        except json.JSONDecodeError:
-            logger.error(f"Failed to parse the response from llm for {lead_type}. Please try again.")
+            for lead in generated_leads:
+                if "entity" in lead:
+                    leads.append({"Entity": lead["entity"].strip()})
         except Exception as e:
-            logger.error(f"An error occurred while generating leads for {lead_type}: {e}")
-
+            logger.error(f"Error in generate_leads_with_llm for {lead_type}: {e}")
 
     return leads
 
@@ -819,14 +715,16 @@ def search_conference_attendees_exhibitors(conference_name, context):
 def scrape_conference_website(conference_url, context):
     """
     Attempts to scrape the conference website to extract exhibitors or attendees, using context.
-    Returns a list of tuples (name, type).
+    Returns a list of dictionaries with the key 'Entity'.
     
     :param conference_url: URL of the conference website.
     :param context: Contextual information to guide the extraction (e.g., conference theme).
-    :return: List of tuples containing company/attendee names and their types.
+    :return: List of dictionaries containing company/attendee names under the key 'Entity'.
     """
     leads_list = []
     try:
+        logger.info(f"Starting to scrape conference website: {conference_url} with context: {context}")
+        
         # Fetch the conference website
         response = requests.get(conference_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
         response.raise_for_status()
@@ -852,6 +750,7 @@ def scrape_conference_website(conference_url, context):
 
         # Remove duplicate URLs
         relevant_links = list(set(relevant_links))
+        logger.info(f"Found {len(relevant_links)} relevant sub-pages to scrape.")
 
         # Scrape each relevant link to extract company/attendee names
         for link in relevant_links:
@@ -865,37 +764,81 @@ def scrape_conference_website(conference_url, context):
                 # Extract text from the page
                 text = page_soup.get_text(separator=' ', strip=True)
 
-                # Use llm to extract company names from the text, passing the context
+                # Use LLM to extract company names from the text, passing the context
                 extracted_leads = extract_companies_from_text(text, context)
-                leads_list.extend(extracted_leads)
+                
+                # Ensure extracted_leads is a list of strings
+                if isinstance(extracted_leads, list):
+                    for lead in extracted_leads:
+                        if isinstance(lead, str) and lead.strip():
+                            leads_list.append({"Entity": lead.strip()})
+                else:
+                    logger.warning(f"extract_companies_from_text returned non-list type: {type(extracted_leads)}")
             except requests.exceptions.RequestException as e:
                 logger.error(f"Error fetching sub-page {link}: {e}")
             except Exception as e:
                 logger.error(f"Unexpected error while scraping {link}: {e}")
 
-        # Remove duplicate leads
-        leads_list = list(set(leads_list))
+        # Remove duplicate leads based on 'Entity'
+        unique_leads = {lead["Entity"] for lead in leads_list if "Entity" in lead and isinstance(lead["Entity"], str)}
+        leads_list = [{"Entity": entity} for entity in unique_leads]
+        logger.info(f"Extracted {len(leads_list)} unique leads from conference website.")
+    
     except requests.exceptions.RequestException as e:
         logger.error(f"Error fetching conference website {conference_url}: {e}")
     except Exception as e:
         logger.error(f"Unexpected error in scrape_conference_website: {e}")
-
+    
     return leads_list
+
 
 def search_leads_via_conference(conference_input, context):
     """
     Searches for leads based on the conference name or URL, using context.
-    Returns a list of tuples (name, type).
+    Returns a list of dictionaries with the key 'Entity'.
+    
+    :param conference_input: Conference name or URL.
+    :param context: Contextual information to guide the search.
+    :return: List of dictionaries containing company/attendee names under the key 'Entity'.
     """
     leads_list = []
-    # Check if the input is a URL
-    if re.match(r'https?://', conference_input):
-        # It's a URL, try to scrape it
-        leads_list = scrape_conference_website(conference_input, context)
-    else:
-        # It's a conference name, perform a search
-        leads_list = search_conference_attendees_exhibitors(conference_input, context)
-    return leads_list
+    try:
+        # Check if the input is a URL
+        if re.match(r'https?://', conference_input):
+            # It's a URL, try to scrape it
+            leads = scrape_conference_website(conference_input, context)
+        else:
+            # It's a conference name, perform a search
+            leads = search_conference_attendees_exhibitors(conference_input, context)
+        
+        # Ensure all leads are dictionaries with 'Entity' key
+        for lead in leads:
+            if isinstance(lead, dict) and 'Entity' in lead:
+                entity = lead['Entity']
+                if isinstance(entity, str) and entity.strip():
+                    leads_list.append({"Entity": entity.strip()})
+            elif isinstance(lead, str) and lead.strip():
+                # If lead is a string, wrap it in a dictionary
+                leads_list.append({"Entity": lead.strip()})
+            else:
+                logger.warning(f"Invalid lead format: {lead}")
+        
+        # Deduplicate leads based on 'Entity'
+        unique_entities = set()
+        unique_leads = []
+        for lead in leads_list:
+            entity = lead.get("Entity")
+            if entity and entity not in unique_entities:
+                unique_leads.append({"Entity": entity})
+                unique_entities.add(entity)
+        
+        logger.info(f"Total unique leads found via conference: {len(unique_leads)}")
+        return unique_leads
+
+    except Exception as e:
+        logger.error(f"Error searching leads via conference: {e}")
+        return []
+
 
 def extract_companies_from_text(text, context):
     """
@@ -918,11 +861,9 @@ Please provide the extracted information in JSON format only. Ensure the JSON is
 Example:
 ["Company A", "Company B", "Company C"]
 """
-        companies_text = llm_reasoning(prompt)
-        logger.info(f"Extracted companies: {companies_text}")
-
-        companies = json.loads(companies_text)
-        leads_list = [(company.strip(), 'Company') for company in companies if company and len(company.strip()) > 1]
+        response = llm_reasoning(prompt, "gpt-4o-mini")
+        companies = json.loads(response)
+        return list(set(company.strip() for company in companies if company.strip()))
     except Exception as e:
-        logger.error(f"Error extracting companies from text: {e}")
-    return leads_list
+        logger.error(f"Error in extract_companies_from_text: {e}")
+        return []

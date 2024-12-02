@@ -4,7 +4,6 @@ import streamlit as st
 import pandas as pd
 from streamlit_tags import st_tags
 from io import BytesIO
-import re
 import seaborn as sns
 import time
 import random
@@ -44,7 +43,6 @@ from utils import (
     extract_lead_info_with_llm_per_field,
     search_leads_via_conference,
     clean_dataframe,
-    scrape_information_field,
     display_lead_information
 )
 
@@ -100,7 +98,9 @@ session_vars = [
     'processed_leads', 'leads_info_df', 'is_scraping',
     'person_leads_df', 'leads', 'leads_df',
     'ranked_leads_df', 'excel_filename', 'menu_selection',
-    'step', 'context'
+    'step', 'context',
+    'selected_conference_leads',
+    'conference_leads_selection'
 ]
 
 for var in session_vars:
@@ -115,6 +115,8 @@ for var in session_vars:
             st.session_state[var] = 0
         elif var == 'context':
             st.session_state[var] = ""
+        elif var in ['selected_conference_leads', 'conference_leads_selection']:
+            st.session_state[var] = {}
         else:
             st.session_state[var] = []
 
@@ -131,7 +133,7 @@ selected = option_menu(
     icons=["pencil", "search", "bar-chart", "activity", "people", "book", "download"],
     menu_icon="cast",
     orientation="horizontal",
-    key='main_menu'
+    key='menu_selection'
 )
 
 # Update menu selection in session state
@@ -144,23 +146,51 @@ if selected != st.session_state['menu_selection']:
 
 def input_leads():
     """
-    Section for Input Leads: Generate Leads or Add Leads Manually.
+    Section for Input Leads: Generate Leads, Add Leads Manually, or Search Leads via Conference.
     """
-    leads_list = []
+    # ==========================
+    # Initialize Session State
+    # ==========================
+    if 'leads' not in st.session_state:
+        st.session_state['leads'] = []
 
+    if 'leads_df' not in st.session_state:
+        st.session_state['leads_df'] = pd.DataFrame(columns=["Entity"])
+
+    if 'context' not in st.session_state:
+        st.session_state['context'] = ""
+
+    if 'step' not in st.session_state:
+        st.session_state['step'] = 1
+
+    # ==========================
+    # Input Leads Section
+    # ==========================
     st.subheader("Input Leads")
 
+    # Context Input
     context = st.text_area("Context:", value=st.session_state['context'])
     st.session_state['context'] = context
 
+    # Lead Input Options
     option = st.radio(
-            "Choose how to input leads:",
-            ["Generate Leads", "Add Leads Manually", "Search Leads via Conference"], # "Search Leads via Conference" - maybe this is not a necessary addition, but for now we keep it - otherwise we need an LLM pass
-            key='lead_input_option'
-        )
+        "Choose how to input leads:",
+        ["Generate Leads", "Add Leads Manually", "Search Leads via Conference"],
+        key='lead_input_option'
+    )
 
+    # ==========================
+    # Generate Leads Section
+    # ==========================
     if option == "Generate Leads":
-        num_leads_total = st.number_input("Number of leads per type:", min_value=1, max_value=100, value=10, step=1, key='num_leads_total')
+        num_leads_total = st.number_input(
+            "Number of leads per type:",
+            min_value=1,
+            max_value=100,
+            value=10,
+            step=1,
+            key='num_leads_total'
+        )
         default_lead_types = ["Research Groups"]
         lead_types = st_tags(
             label='',
@@ -185,16 +215,19 @@ def input_leads():
                 if leads:
                     # Append to the existing leads list
                     st.session_state['leads'].extend(leads)
-                    
-                    # Create a DataFrame from the new leads
-                    new_leads_df = pd.DataFrame(leads, columns=["Entity", "Type", "University", "City", "Country"])
-                    
+
+                    # Create a DataFrame from the new leads with 'Entity' column
+                    new_leads_df = pd.DataFrame(leads, columns=["Entity"])
+
                     # Append to the existing leads_df DataFrame
-                    st.session_state['leads_df'] = pd.concat([st.session_state['leads_df'], new_leads_df], ignore_index=True)
-                    
+                    st.session_state['leads_df'] = pd.concat(
+                        [st.session_state['leads_df'], new_leads_df],
+                        ignore_index=True
+                    )
+
                     # Update the 'step' if necessary
                     st.session_state['step'] = max(st.session_state['step'], 2)
-                    
+
                     st.success(f"Leads generated successfully! Total leads: {len(st.session_state['leads'])}")
                     logger.info(f"Generated {len(leads)} leads.")
                 else:
@@ -202,11 +235,14 @@ def input_leads():
                     st.error("Failed to generate leads. Please check the logs for more details.")
                     st.stop()
 
+    # ==========================
+    # Add Leads Manually Section
+    # ==========================
     if option == "Add Leads Manually":
         st.write("Enter your leads below:")
 
         leads_input = st.text_area(
-            "Enter one lead per line, in the format 'Entity, Type, University, City, Country':",
+            "Enter one lead per line, in the format 'Entity':",
             height=150,
             key='manual_leads_input'
         )
@@ -214,162 +250,172 @@ def input_leads():
         add_leads_btn = st.button("Add Leads", key='add_leads_btn')
         if add_leads_btn:
             if not context.strip():
-                logger.error("Lead generation attempted with empty context.")
-                st.warning("Please provide a context for lead generation.")
+                logger.error("Lead addition attempted with empty context.")
+                st.warning("Please provide a context for lead addition.")
             for line in leads_input.strip().split('\n'):
                 parts = line.strip().split(',')
-                if len(parts) == 5:
+                if len(parts) == 1:
                     name = parts[0].strip()
-                    lead_type = parts[1].strip()
-                    university = parts[2].strip()
-                    city = parts[3].strip()
-                    country = parts[4].strip()
 
                     leads_list.append({
-                        "Entity": name,
-                        "Type": lead_type,
-                        "University": university,
-                        "City": city,
-                        "Country": country
+                        "Entity": name
                     })
                 else:
                     logger.warning(f"Invalid format in line: {line}")
-                    st.warning(f"Invalid format in line: {line}. Please use 'Entity, Type, University, City, Country'.")
+                    st.warning(f"Invalid format in line: {line}. Please use 'Entity'.")
+
             if leads_list:
                 # Convert existing leads to a set for faster lookup
-                existing_leads_set = set(tuple(lead.values()) for lead in st.session_state['leads'])
+                existing_entities = set(st.session_state['leads_df']['Entity'].tolist()) if 'Entity' in st.session_state['leads_df'].columns else set()
 
                 # Filter out any leads that already exist
-                new_unique_leads = [lead for lead in leads_list if tuple(lead.values()) not in existing_leads_set]
+                new_unique_leads = [lead for lead in leads_list if lead["Entity"] not in existing_entities]
 
                 if new_unique_leads:
                     # Append to the existing leads list
                     st.session_state['leads'].extend(new_unique_leads)
+                    logger.debug(f"new_unique_leads: {new_unique_leads[:5]}") 
                     
+                    # Create DataFrame for new leads with 'Entity' column
+                    new_leads_df = pd.DataFrame(new_unique_leads, columns=["Entity"])
+
                     # Append to the existing leads_df DataFrame
-                    new_leads_df = pd.DataFrame(new_unique_leads, columns=["Entity", "Type", "University", "City", "Country"])
-                    st.session_state['leads_df'] = pd.concat([st.session_state['leads_df'], new_leads_df], ignore_index=True)
-                    
+                    st.session_state['leads_df'] = pd.concat(
+                        [st.session_state['leads_df'], new_leads_df],
+                        ignore_index=True
+                    )
+
                     # Update the 'step' if necessary
                     st.session_state['step'] = max(st.session_state['step'], 2)
-                    
+
                     st.success(f"Added {len(new_unique_leads)} new leads successfully! Total leads: {len(st.session_state['leads'])}")
                     logger.info(f"Added {len(new_unique_leads)} leads manually.")
                 else:
                     st.info("No new unique leads to add.")
             else:
                 logger.error("No valid leads entered.")
-                st.error("No valid leads entered. Please ensure each line is in the format 'Entity, Type, University, City, Country'.")
+                st.error("No valid leads entered. Please ensure each line contains 'Entity'.")
                 st.stop()
 
+    # ==========================
+    # Search Leads via Conference Section
+    # ==========================
     elif option == "Search Leads via Conference":
+        st.write("### Search Leads via Conference")
         st.write("Enter the conference details below:")
         conference_input = st.text_input("Enter the conference name or URL:", key='conference_input')
 
         search_btn = st.button("Search Leads", key='search_conference_leads_btn')
         if search_btn:
             if not context.strip():
-                logger.error("Lead generation attempted with empty context.")
-                st.error("Please provide a context for lead generation.")
+                logger.error("Lead search via conference attempted with empty context.")
+                st.error("Please provide a context for lead search.")
                 st.stop()
             if not conference_input.strip():
                 st.warning("Please enter a conference name or URL.")
             else:
                 with st.spinner('Searching for leads associated with the conference...'):
-                    leads_list = search_leads_via_conference(conference_input, context)
-                    if leads_list:
-                        # Convert existing leads to a set for faster lookup
-                        existing_leads_set = set(st.session_state['leads'])
+                    leads_found = search_leads_via_conference(conference_input, context)
+                    if leads_found:
+                        st.success(f"Found {len(leads_found)} leads related to the conference.")
+                        
+                        # Ensure leads_found is a list of dictionaries with 'Entity' key
+                        new_conference_leads = [{"Entity": lead["Entity"]} for lead in leads_found if "Entity" in lead]
 
-                        # Filter out any leads that already exist
-                        new_unique_leads = [lead for lead in leads_list if lead not in existing_leads_set]
+                        # Remove duplicates based on 'Entity'
+                        existing_entities = set(st.session_state['leads_df']['Entity'].tolist()) if 'Entity' in st.session_state['leads_df'].columns else set()
+                        unique_conference_leads = [lead for lead in new_conference_leads if lead["Entity"] not in existing_entities]
 
-                        if new_unique_leads:
+                        if unique_conference_leads:
                             # Append to the existing leads list
-                            st.session_state['leads'].extend(new_unique_leads)
+                            st.session_state['leads'].extend(unique_conference_leads)
+                            logger.debug(f"Unique conference leads: {unique_conference_leads[:5]}")
                             
-                            # Create a DataFrame from the new leads
-                            new_leads_df = pd.DataFrame(new_unique_leads, columns=["Entity", "Type", "University", "City", "Country"])
+                            # Create DataFrame for new conference leads with 'Entity' column
+                            conference_leads_df = pd.DataFrame(unique_conference_leads, columns=["Entity"])
 
                             # Append to the existing leads_df DataFrame
-                            st.session_state['leads_df'] = pd.concat([st.session_state['leads_df'], new_leads_df], ignore_index=True)
-                            
-                            st.success(f"Leads extracted successfully! Added {len(new_unique_leads)} new leads. Total leads: {len(st.session_state['leads'])}")
-                            logger.info(f"Extracted {len(new_unique_leads)} leads from conference input.")
+                            st.session_state['leads_df'] = pd.concat(
+                                [st.session_state['leads_df'], conference_leads_df],
+                                ignore_index=True
+                            )
+
+                            st.success(f"Added {len(unique_conference_leads)} new conference leads successfully!")
+                            logger.info(f"Added {len(unique_conference_leads)} conference leads.")
                         else:
-                            st.info("No new unique leads found for the provided conference.")
+                            st.info("All found conference leads are already present in the leads list.")
                     else:
-                        st.warning("No leads found for the provided conference.")
+                        st.warning("No leads found for the provided conference. Please try a different conference name or URL.")
 
-    # Display the Leads DataFrame if it exists
-    if not st.session_state['leads_df'].empty:
+    # ==========================
+    # Display and Manage Leads
+    # ==========================
+    if 'leads_df' in st.session_state and not st.session_state['leads_df'].empty:
         st.write("### Leads")
-        st.write("You can edit the leads below:")
+        st.write("You can select or deselect leads below:")
 
-        try:
-            # Create a temporary DataFrame to work with
-            temp_leads_df = st.session_state['leads_df'].copy()
+        # Streamlit's data_editor inherently provides row selection on the left.
+        # No need for additional checkboxes or selection columns.
 
-            # Use the data editor on the temporary DataFrame
-            edited_leads_df = st.data_editor(
-                temp_leads_df,
-                num_rows="dynamic",
-                key='leads_editor'
-            )
+        # Display the leads using st.data_editor with selectable rows
+        edited_leads_df = st.data_editor(
+            st.session_state['leads_df'],
+            num_rows="dynamic",
+            use_container_width=True,
+            column_config={
+                "Entity": st.column_config.TextColumn("Entity"),
+            },
+            key='leads_editor',
+            height=400
+        )
 
-            # Add a 'Save Changes' button to commit the edits
-            if st.button('Save Changes', key='save_leads_changes'):
-                # Update the session state with the edited leads
-                st.session_state['leads_df'] = edited_leads_df
+        # Save Changes Button to commit the edits
+        save_btn = st.button('Save Selection', key='save_leads_changes')
+        if save_btn:
+            # Update the leads_df with any edits made in the data editor
+            if isinstance(edited_leads_df, pd.DataFrame):
+                st.session_state['leads_df'] = edited_leads_df.copy()
+                # Update the 'leads' list to reflect changes
+                st.session_state['leads'] = edited_leads_df[['Entity']].to_dict('records')
+                st.success("Selections saved successfully!")
+                logger.info("Selections saved successfully via data editor.")
+            else:
+                logger.error("Edited leads_df is not a DataFrame.")
+                st.error("An error occurred while saving selections. Please try again.")
 
-                # Synchronize the 'leads' list with the updated DataFrame
-                st.session_state['leads'] = list(zip(
-                    edited_leads_df['Entity'],
-                    edited_leads_df['Type'],
-                    edited_leads_df['University'],
-                    edited_leads_df['City'],
-                    edited_leads_df['Country']
-                ))
+        # Provide Download Option for All Leads
+        st.write("### Download All Leads")
+        display_lead_information(
+            df=st.session_state['leads_df'],
+            button_label="All Leads",
+            filename="all_leads"
 
-                st.success("Leads updated successfully!")
-                logger.info("Leads edited via data editor.")
+        )
 
-            # Display the edited DataFrame
-            # display_leads_df = st.session_state['leads_df']
-
-            display_leads_df = st.session_state['leads_df'].copy()
-            # display_leads_df.rename(columns={
-            #     "Entity": "Name",
-            #     "Type": "Category",
-            #     "University": "University",
-            #     "City": "City",
-            #     "Country": "Country"
-            # }, inplace=True)
-
-            display_and_download(
-                df=display_leads_df,
-                button_label="Leads",
-                filename="leads"
-            )
-
-        except Exception as e:
-            logger.error(f"Error editing leads: {e}")
-            st.error(f"Error editing leads: {e}")
-            st.stop()
-    
+    # ==========================
+    # Final Section
+    # ==========================
     st.session_state['input_leads'] = True
     st.success("Input Leads section loaded successfully!")
 
-def scrape_lead_information():
+
+def scrape_lead_information(leads_to_process=None, is_conference=False):
     """
     Section for Analyze Lead Information: Perform per-field searches and scrape information,
     then extract and analyze persons associated with each lead.
+
+    :param leads_to_process: Optional list of leads to process. If None, process all leads in st.session_state['leads'].
+    :param is_conference: Boolean indicating if the leads are conference leads.
     """
     st.subheader("Search and Analyse Lead Information")
+    
+    # Initialize overall progress elements
     progress_bar = st.empty()
     status_text = st.empty()
-    lead_placeholder = st.empty()
-    person_placeholder = st.empty()
+    
+    # Initialize personnel progress elements outside the loop
+    person_status_text = st.empty()
+    person_progress_bar = st.progress(0)
     
     st.header("Analyze Lead Information")
     default_columns = [
@@ -408,8 +454,14 @@ def scrape_lead_information():
             st.warning("Please provide a context for lead scraping.")
             return
         
+        # Determine which leads to process
+        if leads_to_process is not None:
+            leads = leads_to_process
+        else:
+            leads = st.session_state.get('leads', [])
+        
         # Validate that leads are available
-        if not st.session_state.get('leads'):
+        if not leads:
             logger.error("Lead scraping attempted without any generated or added leads.")
             st.error("No leads available. Please add or generate leads first.")
             return
@@ -427,144 +479,165 @@ def scrape_lead_information():
             st.session_state['leads_info_df'] = pd.DataFrame()
             st.session_state['person_leads_df'] = pd.DataFrame()
         
-        total_leads = len(st.session_state['leads'])
-        progress_increment = 100 / total_leads
-        progress = 0
-        progress_bar.progress(0)
+        total_leads = len(leads)
+        
         status_text.text("Starting lead information scraping...")
-        print("dic:", st.session_state['leads'])
-        print(f"st.session_state['leads']: {st.session_state['leads']}")
-        for idx, lead in enumerate(st.session_state['leads']):
-
+        
+        # Initialize overall progress bar
+        progress_bar.progress(0)
+        
+        for idx, lead in enumerate(leads):
             lead_name = lead.get("Entity", "Unknown")
             lead_category = lead.get("Type", "Unknown")
             lead_university = lead.get("University", "Unknown")
             lead_city = lead.get("City", "Unknown")
             lead_country = lead.get("Country", "Unknown")
                     
+            # Update overall progress based on current lead index
+            current_progress = (idx + 1) / total_leads
+            progress_bar.progress(current_progress)
             status_text.text(f"Processing Lead {idx + 1} of {total_leads}: {lead_name}")
-            # Analyse per-field information
-            field_data_list = []
-            for field in columns_to_retrieve:
-                if field in ["Entity", "Summary", "Type"]:
-                    continue  # Skip fields that don't require scraping
-                field_data = scrape_information_field(lead_name, field, num_search_results=1)
-                field_data_list.append(field_data)
-                time.sleep(random.uniform(1, 3))  # Respect rate limits
             
             # Extract lead information using GPT with chunking
-            lead_info = extract_lead_info_with_llm_per_field(lead_name, lead_category, field_data_list)
+            lead_info = extract_lead_info_with_llm_per_field(lead_name)
             if lead_info:
-                # Append lead information to the DataFrame
+                # Append lead information to the main leads DataFrame
                 st.session_state['leads_info_df'] = pd.concat(
                     [st.session_state['leads_info_df'], pd.DataFrame([lead_info])],
                     ignore_index=True
                 )
                 st.session_state['processed_leads'].append(lead_info)
-                
+            
                 # Update the UI with the newly processed lead
-                with lead_placeholder.container():
+                with st.container():
                     st.markdown(f"### {lead_info.get('Entity', 'Unknown')}")
                     st.json(lead_info, expanded=False)
                     st.markdown("---")
             
             # Extract and Analyze Persons Associated with the Lead
-            with person_placeholder.container():
-                st.subheader(f"Extracting Persons for {lead_name}")
-                person_status_text = st.empty()
-                person_progress_bar = st.progress(0)
+            persons = extract_persons(
+                st.session_state['leads_info_df'] if not is_conference else st.session_state['processed_leads']
+            )
+            
+            if not persons:
+                logger.warning(f"No persons found associated with the lead '{lead_name}'.")
+                st.warning(f"No persons found associated with the lead '{lead_name}'.")
+                person_progress_bar.progress(1.0)  # Mark personnel progress as complete for this lead
+            else:
+                logger.info(f"Found {len(persons)} unique persons associated with the lead '{lead_name}'.")
+                person_progress_increment = 1.0 / len(persons) if len(persons) > 0 else 1
+                person_progress = 0
                 
-                persons = extract_persons(st.session_state['leads_info_df'])
+                for p_idx, (person_name, associated_lead) in enumerate(persons):
+                    person_status_text.text(f"Processing Person {p_idx + 1}/{len(persons)}: {person_name}")
+                    
+                    # Include the additional keywords in the search
+                    person_urls = perform_google_search(person_name, additional_keywords=person_search_keywords)
+                    if not person_urls:
+                        logger.warning(f"No URLs found for '{person_name}'.")
+                        continue
+                    scraped_text = ""
+                    sources = []
+                    # Analyze the URLs
+                    for url in person_urls:
+                        logger.info(f"Looking at URL for '{person_name}': {url}")
+                        with st.spinner(f"Looking at URL for '{person_name}': {url}"):
+                            scraped_content = scrape_landing_page(url)
+                            if scraped_content:
+                                scraped_text += scraped_content + " "
+                                sources.append(url)
+                            time.sleep(random.uniform(1, 2))  # Respect rate limits
+                    if not scraped_text.strip():
+                        logger.warning(f"No text scraped from URLs for '{person_name}'. Skipping.")
+                        continue
+                    cleaned_text = clean_text(scraped_text)
+                    source_urls = sources
+                    person_info = extract_person_info_with_llm(cleaned_text, person_name, source_urls)
+                    if person_info:
+                        person_info['Name'] = person_name  # Ensure correct name assignment
+                        st.session_state['person_leads_df'] = pd.concat(
+                            [st.session_state['person_leads_df'], pd.DataFrame([person_info])],
+                            ignore_index=True
+                        )
+                    
+                    # Update personnel progress bar
+                    person_progress += person_progress_increment
+                    person_progress_bar.progress(min(person_progress, 1.0))
                 
-                if not persons:
-                    logger.warning(f"No persons found associated with the lead '{lead_name}'.")
-                    st.warning(f"No persons found associated with the lead '{lead_name}'.")
+                if is_conference:
+                    st.success(f"Person information scraped successfully for conference leads!")
+                    logger.info(f"Person information scraped successfully for conference leads.")
                 else:
-                    logger.info(f"Found {len(persons)} unique persons associated with the lead '{lead_name}'.")
-                    person_progress_increment = 100 / len(persons)
-                    person_progress = 0
-                    person_leads = []
-
-                    print("dic:", st.session_state['leads_info_df'])
-                    print(f"st.session_state['leads_info_df']: {st.session_state['leads_info_df']}")
-                    
-                    for p_idx, (person_name, associated_lead) in enumerate(persons):
-                        person_status_text.text(f"Processing Person {p_idx + 1}/{len(persons)}: {person_name}")
-                        # Include the additional keywords in the search
-                        person_urls = perform_google_search(person_name, additional_keywords=person_search_keywords)
-                        if not person_urls:
-                            logger.warning(f"No URLs found for '{person_name}'.")
-                            continue
-                        scraped_text = ""
-                        sources = []
-                        # Analyse the URLs
-                        for url in person_urls:
-                            logger.info(f"Looking at URL for '{person_name}': {url}")
-                            with st.spinner(f"Looking at URL for '{person_name}': {url}"):
-                                scraped_content = scrape_landing_page(url)
-                                if scraped_content:
-                                    scraped_text += scraped_content + " "
-                                    sources.append(url)
-                                time.sleep(random.uniform(1, 2))  # Respect rate limits
-                        if not scraped_text.strip():
-                            logger.warning(f"No text scraped from URLs for '{person_name}' Skipping.")
-                            continue
-                        cleaned_text = clean_text(scraped_text)
-                        source_urls = sources
-                        person_info = extract_person_info_with_llm(cleaned_text, person_name, source_urls)
-                        if person_info:
-                            person_info['Name'] = person_name  # Ensure correct name assignment
-                            person_leads.append(person_info)
-                        
-                        # Update person progress bar
-                        person_progress += person_progress_increment
-                        person_progress_bar.progress(min(person_progress, 100) / 100)
-                    
-                    # Append person leads to the session state DataFrame
-                    if person_leads:
-                        try:
-                            person_leads_df = pd.DataFrame(person_leads)
-                            st.session_state['person_leads_df'] = pd.concat(
-                                [st.session_state['person_leads_df'], person_leads_df],
-                                ignore_index=True
-                            )
-                            st.success(f"Person information scraped successfully for lead '{lead_name}'!")
-                            logger.info(f"Person information scraped successfully for lead '{lead_name}'.")
-                            
-                            # Display the person leads information
-                            st.write(f"### Persons Associated with {lead_name}")
-                            display_lead_information(
-                                df=person_leads_df,
-                                button_label="Download Person Leads Information",
-                                filename=f"person_leads_info_{lead_name.replace(' ', '_')}"
-                            )
-                            
-                        except Exception as e:
-                            logger.error(f"Error creating person_leads_df: {e}")
-                            st.error(f"Error processing scraped person information for lead '{lead_name}': {e}")
-                    else:
-                        logger.error(f"Person information scraping failed for lead '{lead_name}'.")
-                        st.error(f"Failed to scrape person information for lead '{lead_name}'. Please check the logs for more details.")
-                        
-            # Update overall progress bar
-            progress += progress_increment
-            progress_bar.progress(min(progress, 100) / 100)
-        
+                    st.success(f"Person information scraped successfully for lead '{lead_name}'!")
+                    logger.info(f"Person information scraped successfully for lead '{lead_name}'.")
+                
+                # Display the person leads information
+                st.write(f"### Persons Associated with {lead_name}")
+                display_lead_information(
+                    df=st.session_state['person_leads_df'],
+                    button_label="Download Person Leads Information",
+                    filename=f"person_leads_info_{lead_name.replace(' ', '_')}"
+                )
+    
+        # After all leads are processed, mark progress as complete
+        progress_bar.progress(1.0)
+        person_progress_bar.progress(1.0)
         status_text.text("Lead information scraping completed!")
         st.success("All leads have been processed successfully.")
         st.session_state['is_scraping'] = False
-    
-    # Display the Leads Information DataFrame if it exists
-    if not st.session_state.get('leads_info_df', pd.DataFrame()).empty:
-        st.write("### Leads Information")
+
+    # Display the Leads DataFrame if it exists
+    if not st.session_state['leads_df'].empty:
+        st.write("### Leads")
+        st.write("You can edit the leads below:")
+
+        try:
+            # Create a temporary DataFrame to work with
+            temp_leads_df = st.session_state['leads_df'].copy()
+
+            # Use the data editor on the temporary DataFrame
+            edited_leads_df = st.data_editor(
+                temp_leads_df,
+                num_rows="dynamic",
+                key='leads_editor'
+            )
+
+            # Add a 'Save Changes' button to commit the edits
+            if st.button('Save Changes', key='save_leads_changes'):
+                # Update the session state with the edited leads
+                st.session_state['leads_df'] = edited_leads_df
+
+                # Synchronize the 'leads' list with the updated DataFrame
+                st.session_state['leads'] = edited_leads_df.to_dict('records')
+
+                st.success("Leads updated successfully!")
+                logger.info("Leads edited via data editor.")
+
+            # Display the edited DataFrame
+            display_leads_df = st.session_state['leads_df'].copy()
+
+            display_and_download(
+                df=display_leads_df,
+                button_label="Leads",
+                filename="leads"
+            )
+
+        except Exception as e:
+            logger.error(f"Error editing leads: {e}")
+            st.error(f"Error editing leads: {e}")
+            st.stop()
+
+    # Display the Selected Conference Leads Information if it exists
+    if 'leads_info_df' in st.session_state and not st.session_state['leads_info_df'].empty:
+        st.write("### Selected Conference Leads Information")
         display_lead_information(
             df=st.session_state['leads_info_df'],
-            button_label="Download Leads Information",
-            filename="leads_info"
+            button_label="Selected Conference Leads Information",
+            filename="selected_conference_leads_info"
         )
-    
-    st.session_state['scrape_lead_information'] = True
-    st.success("Lead information section loaded successfully!")
+
+    st.session_state['input_leads'] = True
+    st.success("Input Leads section loaded successfully!")
 
 def analytics_section():
     """
@@ -1390,7 +1463,7 @@ def author_papers_section():
 
 def download_data_section():
     st.subheader("Download Data")
-    
+
     # Option to download Leads Information
     if not st.session_state['leads_info_df'].empty:
         st.markdown("### Download Leads Information")
@@ -1404,7 +1477,7 @@ def download_data_section():
                 logger.error(f"Error downloading leads_info: {e}")
                 st.error(f"Error downloading leads information: {e}")
                 st.stop()
-    
+
     # Option to download Ranked Leads with BANT
     if 'company_bant_df' in st.session_state and not st.session_state['company_bant_df'].empty:
         st.markdown("### Download Ranked Leads with BANT Scores")
@@ -1432,7 +1505,7 @@ def download_data_section():
                 logger.error(f"Error downloading BANT report: {e}")
                 st.error(f"Error downloading BANT report: {e}")
                 st.stop()
-    
+
     # Option to download Person Leads
     if not st.session_state['person_leads_df'].empty:
         st.markdown("### Download Person Leads")
@@ -1454,7 +1527,7 @@ def download_data_section():
                     logger.error(f"Error downloading person_leads: {e}")
                     st.error(f"Error downloading person leads: {e}")
                     st.stop()
-    
+
     # Option to download Company BANT Scores
     if 'company_bant_df' in st.session_state and not st.session_state['company_bant_df'].empty:
         st.markdown("### Download Company BANT Scores")
@@ -1468,7 +1541,7 @@ def download_data_section():
                 logger.error(f"Error downloading company_bant_df: {e}")
                 st.error(f"Error downloading company BANT scores: {e}")
                 st.stop()
-    
+
     # Option to download all data together (ZIP functionality can be implemented as needed)
     st.markdown("### Download All Data")
     all_download_btn = st.button("Download All Data as ZIP", key='download_all_data_btn')
@@ -1486,7 +1559,7 @@ def rank_leads_section():
         st.warning("No context provided. Please go back to 'Input Leads' to provide context.")
         if st.button("Go to Input Leads"):
             st.session_state['menu_selection'] = "Input Leads"
-            st.experimental_rerun()
+            st.rerun()
         return
     
     st.markdown("**Context for BANT Analysis:**")
