@@ -1,0 +1,13 @@
+cookie:
+  expiry_days: 30
+  key: doyoulikehueylewisandthenews?
+  name: auth_token
+credentials:
+  usernames:
+    demo:
+      email: demo
+      failed_login_attempts: 0 # Will be managed automatically
+      first_name: Demo
+      last_name: User
+      logged_in: False # Will be managed automatically
+      password: a$$word # Will be hashed automatically
