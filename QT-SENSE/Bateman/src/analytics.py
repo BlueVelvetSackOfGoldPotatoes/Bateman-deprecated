@@ -113,21 +113,7 @@ def generate_bant_report(person_leads_df, company_bant_df):
         return report_buffer
     except Exception as e:
         logger.error(f"Error generating BANT report: {e}")
-        return None
-    
-def summarize_paper(paper_title, paper_abstract):
-    """
-    Generates a summary for a given paper abstract using llm.
-    """
-    try:
-        prompt = f"Provide a summary for the following paper. Together with a summary of the overall paper, be sure to inlude the methods used, what was the experiment, what technologies were used, what was the result, and what were the hypotheses as well as the relevant field. \n\nTitle: {paper_title}\n\nAbstract: {paper_abstract}\n\nSummary:"
-        
-        summary = llm_reasoning(prompt)
-        return summary
-    except Exception as e:
-        logger.error(f"Error summarizing paper '{paper_title}': {e}")
-        return "Summary not available."
-    
+        return None    
 
 def perform_bant_analysis(lead_info, context):
     """

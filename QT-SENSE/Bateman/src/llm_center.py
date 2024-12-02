@@ -99,7 +99,7 @@ def llm_reasoning(prompt, model="gpt-4o", t=0.2):
     """
     try:
         response = client.chat.completions.create(
-            model= "gpt-4o-mini", # should be model, but for test purposes...
+            model= model, # should be model, but for test purposes...
             messages=[{"role": "user", "content": prompt}],
             temperature=t
         )
